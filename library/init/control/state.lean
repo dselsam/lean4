@@ -21,6 +21,12 @@ Prod.fst <$> x s
 
 @[reducible] def State (σ α : Type u) : Type u := StateT σ Id α
 
+@[inline] def State.run {σ : Type u} {m : Type u → Type v} {α : Type u} (x : State σ α) (s : σ) : α × σ :=
+Id.run $ x s
+
+@[inline] def State.run' {σ : Type u} {m : Type u → Type v} {α : Type u} (x : State σ α) (s : σ) : α :=
+Id.run $ Prod.fst <$> x s
+
 namespace StateT
 section
 variables {σ : Type u} {m : Type u → Type v}
