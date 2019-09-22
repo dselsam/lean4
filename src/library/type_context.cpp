@@ -3348,13 +3348,30 @@ struct instance_synthesizer {
     // START NEW
     typedef rb_expr_map<unsigned> ancestors;
 
+    name m_alpha_norm_tmp_prefix{name::mk_internal_unique_name()};
+
     // TODO(dselsam): better place to put it
     expr anorm(expr const & goal_type) {
         // TODO(dselsam): alpha-normalize!
         // Note: when this is the identity function, there is no loop-detection and caching
         // However, it will be useful for now to confirm that we have preserved semantics of the
         // old resolution engine.
-        return m_ctx.instantiate_mvars(goal_type);
+        std::unordered_map<unsigned, unsigned> tmp_mvar_to_new_id;
+
+        expr pre_norm = m_ctx.instantiate_mvars(goal_type);
+        expr post_norm = replace(pre_norm, [&](expr const & e) {
+            if (!is_idx_metavar(e)) return optional<expr>();
+
+            if (!tmp_mvar_to_new_id.count(to_meta_idx(e))) {
+                tmp_mvar_to_new_id[to_meta_idx(e)] = tmp_mvar_to_new_id.size();
+            }
+
+            auto iter = tmp_mvar_to_new_id.find(to_meta_idx(e));
+            return optional<expr>(mk_constant(m_alpha_norm_tmp_prefix.append_after(iter->second)));
+            });
+        lean_trace(name({"type_context", "class"}),
+                   tout() << "alpha-norm: " << pre_norm << " ==> " << post_norm << "\n";);
+        return post_norm;
     }
 
     struct goal {
@@ -3437,9 +3454,6 @@ struct instance_synthesizer {
         table_entry entry;
         entry.m_anorm_goal_type = cur_node().cur_goal().m_anorm_goal_type;
 
-        lean_trace(name({"type_context", "class"}),
-                   tout() << "create table entry: " << entry.m_anorm_goal_type << "\n";);
-
         if (auto cname = m_ctx.is_class(entry.m_anorm_goal_type)) {
             for (local_instance const & li : m_ctx.m_local_instances) {
                 if (li.get_class_name() == *cname) {
@@ -3470,8 +3484,14 @@ struct instance_synthesizer {
         lean_trace(name({"type_context", "class"}), tout() << "expand: " << goal_type << "\n";);
         expr anorm_goal_type = cur_node().cur_goal().m_anorm_goal_type;
         if (!m_table.count(anorm_goal_type)) {
+            lean_trace(name({"type_context", "class"}),
+                       tout() << "create table entry: " << anorm_goal_type << "\n";);
             m_table.insert({anorm_goal_type, create_table_entry()});
+        } else {
+            lean_trace(name({"type_context", "class"}),
+                       tout() << "found table entry for: " << anorm_goal_type << "\n";);
         }
+
         lean_assert(m_table.count(anorm_goal_type));
         table_entry & entry = m_table.find(anorm_goal_type)->second;
 
@@ -3519,21 +3539,26 @@ struct instance_synthesizer {
         // 3. try rules
         while (cur_node().m_rule_idx < entry.m_rules.size()) {
             unsigned idx = cur_node().m_rule_idx++;
+            lean_trace(name({"type_context", "class"}),
+                       tout() << "trying rule " << idx << "\n";);
             rule & r = entry.m_rules[idx];
             if (r.m_status == rule_status::USED) continue;
 
             if (r.m_is_expr
                 ? try_instance(r.m_inst_expr, m_ctx.infer(r.m_inst_expr), new_inst_mvars)
                 : try_instance(r.m_inst_name, new_inst_mvars)) {
-                push_child_node(optional<unsigned>(idx));
                 if (new_inst_mvars.empty()) {
                     expr answer = cur_node().cur_goal().m_mvar;
                     lean_trace(name({"type_context", "class"}), tout() << "answer: "
                                << answer << " : " << m_ctx.instantiate_mvars(m_ctx.infer(answer)) << "\n";);
                     entry.m_answers.push_back(answer);
                 }
+
+                lean_trace(name({"type_context", "class"}), tout() << "success " << idx << "\n";);
+                push_child_node(optional<unsigned>(idx));
                 return true;
             } else {
+                lean_trace(name({"type_context", "class"}), tout() << "fail " << idx << "\n";);
                 r.m_status = rule_status::USED;
             }
         }
@@ -3674,6 +3699,8 @@ struct instance_synthesizer {
 
         if (rule_idx) {
             table_entry & entry = m_table.find(cur_node().cur_goal().m_anorm_goal_type)->second;
+            lean_trace(name({"type_context", "class"}),
+                       tout() << "setting (" << entry.m_anorm_goal_type << ")." << *rule_idx << " to USED" << "\n";);
             entry.m_rules[*rule_idx].m_status = rule_status::USED;
         }
         // TODO(dselsam): not sure why Leo does pop;pop;push
@@ -3746,7 +3773,8 @@ struct instance_synthesizer {
         time_task t("typeclass inference",
                     message_builder(environment(), get_global_ios(), "foo", pos_info(), message_severity::INFORMATION));
         if (is_trace_enabled() && !is_trace_class_enabled("class_instances")) {
-            scope_trace_silent scope(true);
+            // TODO(dselsam): re-enable (or handle the tracing differently)
+            // scope_trace_silent scope(true);
             return main(type);
         } else {
             lean_trace_init_bool("class_instances", get_pp_purify_metavars_name(), false);
