@@ -3369,8 +3369,8 @@ struct instance_synthesizer {
             auto iter = tmp_mvar_to_new_id.find(to_meta_idx(e));
             return optional<expr>(mk_constant(m_alpha_norm_tmp_prefix.append_after(iter->second)));
             });
-        lean_trace(name({"type_context", "class"}),
-                   tout() << "alpha-norm: " << pre_norm << " ==> " << post_norm << "\n";);
+        lean_trace(name({"type_context", "class", "alpha_norm"}),
+                   tout() << pre_norm << " ==> " << post_norm << "\n";);
         return post_norm;
     }
 
@@ -3481,15 +3481,15 @@ struct instance_synthesizer {
         }
 
         expr goal_type = m_ctx.instantiate_mvars(m_ctx.infer(cur_node().cur_goal().m_mvar));
-        lean_trace(name({"type_context", "class"}), tout() << "expand: " << goal_type << "\n";);
+        lean_trace(name({"type_context", "class", "expand"}), tout() << goal_type << "\n";);
         expr anorm_goal_type = cur_node().cur_goal().m_anorm_goal_type;
         if (!m_table.count(anorm_goal_type)) {
-            lean_trace(name({"type_context", "class"}),
-                       tout() << "create table entry: " << anorm_goal_type << "\n";);
+            lean_trace(name({"type_context", "class", "create_entry"}),
+                       tout() << anorm_goal_type << "\n";);
             m_table.insert({anorm_goal_type, create_table_entry()});
         } else {
-            lean_trace(name({"type_context", "class"}),
-                       tout() << "found table entry for: " << anorm_goal_type << "\n";);
+            lean_trace(name({"type_context", "class", "found_entry"}),
+                       tout() << anorm_goal_type << "\n";);
         }
 
         lean_assert(m_table.count(anorm_goal_type));
@@ -3498,11 +3498,6 @@ struct instance_synthesizer {
         buffer<expr> new_inst_mvars;
 
         auto push_child_node = [&](optional<unsigned> parent_rule_idx) {
-            // TODO(dselsam): if there are no new goals, and the answer has no metas,
-            // then store it in the table.
-            // As for `anorm` above, without this step the semantics should be the
-            // same as the original.
-
             node child(tail(cur_node().m_goals));
             child.m_parent_rule_idx = parent_rule_idx;
 
@@ -3526,44 +3521,49 @@ struct instance_synthesizer {
             expr answer_type = m_ctx.infer(answer);
             lean_verify(try_instance(answer, answer_type, new_inst_mvars));
             lean_assert(new_inst_mvars.empty());
+            lean_trace(name({"type_context", "class", "find_answer"}), tout() << answer << " : " << answer_type << "\n";);
             push_child_node(optional<unsigned>());
             return true;
         }
 
         // 2. check for ancestor
         if (auto stack_idx = cur_node().cur_goal().m_ancestors.find(anorm_goal_type)) {
-            lean_trace(name({"type_context", "class"}), tout() << "loop detected: " << anorm_goal_type << "\n";);
             cur_node().m_rule_idx = m_stack[*stack_idx].m_rule_idx + 1;
+            lean_trace(name({"type_context", "class", "loop"}), tout() << "start at: " << cur_node().m_rule_idx << "\n";);
         }
 
         // 3. try rules
         while (cur_node().m_rule_idx < entry.m_rules.size()) {
             unsigned idx = cur_node().m_rule_idx++;
-            lean_trace(name({"type_context", "class"}),
-                       tout() << "trying rule " << idx << "\n";);
+            lean_trace(name({"type_context", "class", "try_rule"}),
+                       tout() << idx << "\n";);
             rule & r = entry.m_rules[idx];
             if (r.m_status == rule_status::USED) continue;
+
+            // TODO(dselsam): the paper says not to do this yet, but we are observing non-termination
+            // if this does not work, then think harder
+            // r.m_status = rule_status::USED;
 
             if (r.m_is_expr
                 ? try_instance(r.m_inst_expr, m_ctx.infer(r.m_inst_expr), new_inst_mvars)
                 : try_instance(r.m_inst_name, new_inst_mvars)) {
                 if (new_inst_mvars.empty()) {
-                    expr answer = cur_node().cur_goal().m_mvar;
-                    lean_trace(name({"type_context", "class"}), tout() << "answer: "
-                               << answer << " : " << m_ctx.instantiate_mvars(m_ctx.infer(answer)) << "\n";);
+                    expr answer = m_ctx.instantiate_mvars(cur_node().cur_goal().m_mvar);
+                    lean_trace(name({"type_context", "class", "store_answer"}),
+                               tout() << answer << " : " << m_ctx.instantiate_mvars(m_ctx.infer(answer)) << "\n";);
                     entry.m_answers.push_back(answer);
                 }
 
-                lean_trace(name({"type_context", "class"}), tout() << "success " << idx << "\n";);
+                lean_trace(name({"type_context", "class", "unify"}), tout() << idx << "\n";);
                 push_child_node(optional<unsigned>(idx));
                 return true;
             } else {
-                lean_trace(name({"type_context", "class"}), tout() << "fail " << idx << "\n";);
+                lean_trace(name({"type_context", "class", "no_unify"}), tout() << idx << "\n";);
                 r.m_status = rule_status::USED;
             }
         }
 
-        lean_trace(name({"type_context", "class"}), tout() << "failed to expand: " << goal_type << "\n";);
+        lean_trace(name({"type_context", "class", "fail"}), tout() << goal_type << "\n";);
         return false;
     }
 
@@ -3689,7 +3689,7 @@ struct instance_synthesizer {
         // (Leo checks here and returns false)
         lean_assert(!m_stack.empty());
 
-        lean_trace(name({"type_context", "class"}), tout() << "backtrack()" << "\n";);
+        lean_trace(name({"type_context", "class", "backtrack"}), tout() << "\n";);
 
         optional<unsigned> rule_idx = cur_node().m_parent_rule_idx;
         m_stack.pop_back();
@@ -3699,8 +3699,8 @@ struct instance_synthesizer {
 
         if (rule_idx) {
             table_entry & entry = m_table.find(cur_node().cur_goal().m_anorm_goal_type)->second;
-            lean_trace(name({"type_context", "class"}),
-                       tout() << "setting (" << entry.m_anorm_goal_type << ")." << *rule_idx << " to USED" << "\n";);
+            lean_trace(name({"type_context", "class", "set_used"}),
+                       tout() << "(" << entry.m_anorm_goal_type << ")." << *rule_idx << "\n";);
             entry.m_rules[*rule_idx].m_status = rule_status::USED;
         }
         // TODO(dselsam): not sure why Leo does pop;pop;push
@@ -3767,7 +3767,7 @@ struct instance_synthesizer {
     }
 
     optional<expr> operator()(expr const & type) {
-        lean_trace(name({"type_context", "class"}), tout() << "synth: " << type << "\n";);
+        lean_trace(name({"type_context", "class", "start"}), tout() << type << "\n";);
         flet<bool> scope_left(m_ctx.m_update_left, true);
         flet<bool> scope_right(m_ctx.m_update_right, true);
         time_task t("typeclass inference",
@@ -4046,6 +4046,21 @@ void initialize_type_context() {
     register_trace_class(name({"type_context", "smart_unfolding"}));
     register_trace_class(name({"type_context", "tmp_vars"}));
     register_trace_class(name({"type_context", "class"}));
+
+    register_trace_class(name({"type_context", "class", "start"}));
+    register_trace_class(name({"type_context", "class", "loop"}));
+    register_trace_class(name({"type_context", "class", "alpha_norm"}));
+    register_trace_class(name({"type_context", "class", "expand"}));
+    register_trace_class(name({"type_context", "class", "create_entry"}));
+    register_trace_class(name({"type_context", "class", "found_entry"}));
+    register_trace_class(name({"type_context", "class", "try_rule"}));
+    register_trace_class(name({"type_context", "class", "unify"}));
+    register_trace_class(name({"type_context", "class", "no_unify"}));
+    register_trace_class(name({"type_context", "class", "store_answer"}));
+    register_trace_class(name({"type_context", "class", "find_answer"}));
+    register_trace_class(name({"type_context", "class", "fail"}));
+    register_trace_class(name({"type_context", "class", "backtrack"}));
+    register_trace_class(name({"type_context", "class", "set_used"}));
     register_trace_class("type_context_cache");
 }
 
