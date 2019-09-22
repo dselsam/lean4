@@ -3357,10 +3357,13 @@ struct instance_synthesizer {
 
         goal(expr const & m, ancestors const & a):
             m_mvar(m), m_ancestors(a) {}
+
+	unsigned get_depth() const {
+	    return m_ancestors.size();
+	}
     };
 
     struct node {
-	unsigned   m_depth;
 	list<goal> m_goals;
 	unsigned   m_answer_idx{0};
 	unsigned   m_local_idx{0};
@@ -3369,8 +3372,8 @@ struct instance_synthesizer {
 	bool no_goals() const { return empty(m_goals); }
 	goal const & cur_goal() const { return head(m_goals); }
 
-	node(unsigned depth, list<goal> const & goals):
-	    m_depth(depth), m_goals(goals) {}
+	node(list<goal> const & goals):
+	    m_goals(goals) {}
     };
 
     enum class inst_status { UNUSED, ACTIVE, USED };
@@ -3401,6 +3404,11 @@ struct instance_synthesizer {
 	return m_stack.back();
     }
 
+    void push_node(node const & n) {
+	m_stack.push_back(n);
+	push_scope();
+    }
+
     table_entry create_table_entry_for(expr const & anorm_goal_type) {
         auto cname = m_ctx.is_class(anorm_goal_type);
         if (!cname)
@@ -3409,7 +3417,7 @@ struct instance_synthesizer {
 	table_entry entry;
 	entry.anorm_goal_type = anorm_goal_type;
 
-	to_buffer(get_local_instances(*cname), entry.m_local_insts);
+	get_local_instances(*cname, entry.m_local_insts);
 	for (unsigned i = 0; i < entry.m_local_insts.size(); ++i) {
 	    entry.m_local_statuses.push_back(inst_status::UNUSED);
 	}
@@ -3423,6 +3431,14 @@ struct instance_synthesizer {
             return false;
 	}
 	return entry;
+    }
+
+    expr anorm(expr const & goal_type) {
+	// TODO(dselsam): alpha-normalize!
+	// Note: when this is the identity function, there is no loop-detection and caching
+	// However, it will be useful for now to confirm that we have preserved semantics of the
+	// old resolution engine.
+	return goal_type;
     }
 
     // false if we need to backtrack
@@ -3442,20 +3458,24 @@ struct instance_synthesizer {
 	buffer<expr> new_inst_mvars;
 
 	auto push_child_node = [&]() {
-	    node child;
-	    // TODO(dselsam): put depth in the goal, not the node
-	    child.m_depth = cur_node().m_depth + 1;
-	    child.m_goals = cur_node().m_goals.tail();
-	    unsigned i = new_inst_mvars.size();
+	    // TODO(dselsam): if there are no new goals, and the answer has no metas,
+	    // then store it in the table.
+	    // As for `anorm` above, without this step the semantics should be the
+	    // same as the original.
+
+	    node child(cur_node().m_goals.tail());
 
 	    ancestor_set new_ancestors = cur_node().cur_goal().ancestors;
 	    new_ancestors.insert(anorm_goal_type);
+
+	    unsigned i = new_inst_mvars.size();
+
 	    while (i > 0) {
 		--i;
 		child.m_goals = cons(goal(new_inst_mvars[i], new_ancestors), child.m_goals);
 	    }
 
-	    m_stack.push_back(child);
+	    push_node(child);
 	}
 
 	// 1. try answers
@@ -3610,136 +3630,38 @@ struct instance_synthesizer {
         }
     }
 
-    list<expr> get_local_instances(name const & cname) {
-        buffer<expr> selected;
+    void get_local_instances(name const & cname, buffer<name> & local_insts) {
         for (local_instance const & li : m_ctx.m_local_instances) {
             if (li.get_class_name() == cname)
-                selected.push_back(li.get_local());
+                local_insts.push_back(li.get_local());
         }
-        return to_list(selected);
-    }
-
-    bool mk_choice_point(expr const & mvar) {
-        lean_assert(is_metavar(mvar));
-        if (m_choices.size() > m_ctx.m_cache->get_class_instance_max_depth()) {
-            throw_class_exception(m_ctx.infer(m_main_mvar),
-                                  "maximum class-instance resolution depth has been reached "
-                                  "(the limit can be increased by setting option 'class.instance_max_depth') "
-                                  "(the class-instance resolution trace can be visualized "
-                                  "by setting option 'trace.class_instances')");
-        }
-        // Remark: we initially tried to reject branches where mvar_type contained unassigned metavariables.
-        // The idea was to make the procedure easier to understand.
-        // However, it turns out this is too restrictive. The group_theory folder contains the following instance.
-        //     nsubg_setoid : Π {A : Type} [s : group A] (N : set A) [is_nsubg : @is_normal_subgroup A s N], setoid A
-        // When it is used, it creates a subproblem for
-        //    is_nsubg : @is_normal_subgroup A s ?N
-        // where ?N is not known. Actually, we can only find the value for ?N by constructing the instance is_nsubg.
-        expr mvar_ty       = m_ctx.instantiate_mvars(mvar_type(mvar));
-        m_choices.push_back(choice());
-        push_scope();
-        choice & r = m_choices.back();
-        auto cname = m_ctx.is_class(mvar_ty);
-        if (!cname)
-            return false;
-        r.m_local_instances = get_local_instances(*cname);
-        r.m_instances = get_class_instances(env(), *cname);
-        if (empty(r.m_local_instances) && empty(r.m_instances))
-            return false;
-        r.m_state = m_state;
-        return true;
-    }
-
-    bool process_next_alt_core(stack_entry const & e, list<expr> & insts) {
-        while (!empty(insts)) {
-            expr inst       = head(insts);
-            insts           = tail(insts);
-            expr inst_type  = m_ctx.infer(inst);
-            if (try_instance(e, inst, inst_type))
-                return true;
-        }
-        return false;
-    }
-
-    bool process_next_alt_core(stack_entry const & e, names & inst_names) {
-        while (!empty(inst_names)) {
-            name inst_name    = head(inst_names);
-            inst_names        = tail(inst_names);
-            if (try_instance(e, inst_name))
-                return true;
-        }
-        return false;
-    }
-
-    bool process_next_alt(stack_entry const & e) {
-        lean_assert(m_choices.size() > 0);
-        lean_assert(!m_choices.empty());
-        buffer<choice> & cs = m_choices;
-        list<expr> locals = cs.back().m_local_instances;
-        if (process_next_alt_core(e, locals)) {
-            cs.back().m_local_instances = locals;
-            return true;
-        }
-        cs.back().m_local_instances = list<expr>();
-        names insts = cs.back().m_instances;
-        if (process_next_alt_core(e, insts)) {
-            cs.back().m_instances = insts;
-            return true;
-        }
-        cs.back().m_instances = names();
-        return false;
-    }
-
-    bool process_next_mvar() {
-        lean_assert(!is_done());
-        stack_entry e = head(m_state.m_stack);
-        if (!mk_choice_point(e.m_mvar))
-            return false;
-        m_state.m_stack = tail(m_state.m_stack);
-        return process_next_alt(e);
     }
 
     bool backtrack() {
-        if (m_choices.empty())
-            return false;
-        lean_assert(!m_choices.empty());
+	// TODO(dselsam): confirm it can't be empty
+	// (Leo checks here and returns false)
+        lean_assert(!m_stack.empty());
+
         while (true) {
-            m_choices.pop_back();
+            m_stack.pop_back();
             pop_scope();
-            if (m_choices.empty())
+            if (m_stack.empty())
                 return false;
+	    // TODO(dselsam): not sure why Leo does pop;pop;push
             pop_scope(); push_scope(); // restore assignment
-            m_state         = m_choices.back().m_state;
-            stack_entry e   = head(m_state.m_stack);
-            m_state.m_stack = tail(m_state.m_stack);
-            if (process_next_alt(e))
-                return true;
+	    return true;
         }
     }
 
     optional<expr> search() {
-        while (!is_done()) {
-            if (!process_next_mvar()) {
-                if (!backtrack())
+        while (!cur_node().no_goals()) {
+            if (!expand_cur_node()) {
+                if (!backtrack()) {
                     return none_expr();
+		}
             }
         }
         return some_expr(m_ctx.instantiate_mvars(m_main_mvar));
-    }
-
-    optional<expr> next_solution() {
-        if (m_choices.empty())
-            return none_expr();
-        pop_scope(); push_scope(); // restore assignment
-        m_state         = m_choices.back().m_state;
-        stack_entry e   = head(m_state.m_stack);
-        m_state.m_stack = tail(m_state.m_stack);
-        if (process_next_alt(e))
-            return search();
-        else if (backtrack())
-            return search();
-        else
-            return none_expr();
     }
 
     optional<expr> ensure_no_meta(optional<expr> r) {
@@ -3760,17 +3682,20 @@ struct instance_synthesizer {
             lean_trace("class_instances",
                        scope_trace_env scope(m_ctx.env(), m_ctx);
                        tout() << "trying next solution, current solution has metavars\n" << *r << "\n";);
-            r = next_solution();
+
+	    // TODO(dselsam): leo has special support for next solution,
+	    // possibly because he doesn't create the node with no goals.
+	    // Confirm.
+	    backtrack();
+            r = search();
         }
     }
 
     optional<expr> mk_class_instance_core(expr const & type) {
         /* We do not cache results when multiple instances have to be generated. */
-        m_state          = state();
         m_main_mvar      = m_ctx.mk_tmp_mvar(type);
-
 	node root(0, to_list(goal(m_main_mvar)));
-	m_stack.push_back(root);
+	push_node(root);
         auto r = search();
         return ensure_no_meta(r);
     }
