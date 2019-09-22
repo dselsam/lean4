@@ -3348,16 +3348,11 @@ struct instance_synthesizer {
     // START NEW
     typedef rb_expr_map<unsigned> ancestors;
 
-    name m_alpha_norm_tmp_prefix{name::mk_internal_unique_name()};
+    name m_alpha_norm_tmp_prefix;
 
     // TODO(dselsam): better place to put it
 
     expr anorm(expr const & goal_type) {
-        // TODO(dselsam): alpha-normalize!
-        // Note: when this is the identity function, there is no loop-detection and caching
-        // However, it will be useful for now to confirm that we have preserved semantics of the
-        // old resolution engine.
-
         expr pre_norm = m_ctx.instantiate_mvars(goal_type);
 
         std::unordered_map<unsigned, unsigned> lidx_to_new_id;
@@ -3402,31 +3397,24 @@ struct instance_synthesizer {
     // pop_scope() whenever we store?
     // No, we would need to store the scope.
     struct goal {
-        expr         m_anorm_goal_type;
+        // need to store the depth too, since ancestors is a set not a list
         expr         m_mvar;
         ancestors    m_ancestors;
 
-        goal(expr const & anm, expr const & m):
-            m_anorm_goal_type(anm), m_mvar(m) {}
+        goal(expr const & m):
+            m_mvar(m) {}
 
-        goal(expr const & anm, expr const & m, ancestors const & a):
-            m_anorm_goal_type(anm), m_mvar(m), m_ancestors(a) {}
+        goal(expr const & m, ancestors const & a):
+            m_mvar(m), m_ancestors(a) {}
 
         unsigned get_depth() const {
             return m_ancestors.size();
         }
     };
 
-    goal mk_goal(expr const & m) {
-        return goal(anorm(m_ctx.infer(m)), m);
-    }
-
-    goal mk_goal(expr const & m, ancestors const & a) {
-        return goal(anorm(m_ctx.infer(m)), m, a);
-    }
-
     struct node {
         optional<unsigned> m_parent_rule_idx;
+        expr               m_anorm_cur_goal_type;
 
         list<goal> m_goals;
         unsigned   m_answer_idx{0};
@@ -3479,7 +3467,7 @@ struct instance_synthesizer {
 
     table_entry create_table_entry() {
         table_entry entry;
-        entry.m_anorm_goal_type = cur_node().cur_goal().m_anorm_goal_type;
+        entry.m_anorm_goal_type = cur_node().m_anorm_cur_goal_type;
 
         if (auto cname = m_ctx.is_class(entry.m_anorm_goal_type)) {
             for (local_instance const & li : m_ctx.m_local_instances) {
@@ -3507,9 +3495,10 @@ struct instance_synthesizer {
                                   "by setting option 'trace.class_instances')");
         }
 
-        expr goal_type = m_ctx.instantiate_mvars(m_ctx.infer(cur_node().cur_goal().m_mvar));
-        lean_trace(name({"type_context", "class", "expand"}), tout() << goal_type << "\n";);
-        expr anorm_goal_type = cur_node().cur_goal().m_anorm_goal_type;
+        expr goal_type       = m_ctx.instantiate_mvars(m_ctx.infer(cur_node().cur_goal().m_mvar));
+        expr anorm_goal_type = cur_node().m_anorm_cur_goal_type;
+        lean_trace(name({"type_context", "class", "expand"}), tout() << goal_type << " ==> " << anorm_goal_type << "\n";);
+
         if (!m_table.count(anorm_goal_type)) {
             lean_trace(name({"type_context", "class", "create_entry"}),
                        tout() << anorm_goal_type << "\n";);
@@ -3525,6 +3514,12 @@ struct instance_synthesizer {
         buffer<expr> new_inst_mvars;
 
         auto push_child_node = [&](optional<unsigned> parent_rule_idx) {
+            for (expr const & new_goal : new_inst_mvars) {
+                lean_trace(name({"type_context", "class", "new_goal"}),
+                           tout() << m_ctx.instantiate_mvars(new_goal)
+                           << " : " << m_ctx.instantiate_mvars(m_ctx.infer(new_goal)) << "\n";);
+            }
+
             node child(tail(cur_node().m_goals));
             child.m_parent_rule_idx = parent_rule_idx;
 
@@ -3533,11 +3528,20 @@ struct instance_synthesizer {
             new_ancestors.insert(anorm_goal_type, m_stack.size()-1);
             lean_assert(new_ancestors.contains(anorm_goal_type));
 
+            cur_node().cur_goal().m_ancestors.for_each([&](expr const & e, unsigned idx) {
+                    lean_trace(name({"type_context", "class", "new_ancestors"}),
+                               tout() << "ANCESTOR: " << e << " @ " << idx << "\n";);
+                });
+
             unsigned i = new_inst_mvars.size();
 
             while (i > 0) {
                 --i;
-                child.m_goals = cons(mk_goal(new_inst_mvars[i], new_ancestors), child.m_goals);
+                child.m_goals = cons(goal(new_inst_mvars[i], new_ancestors), child.m_goals);
+            }
+
+            if (!child.no_goals()) {
+                child.m_anorm_cur_goal_type = anorm(m_ctx.infer(child.cur_goal().m_mvar));
             }
 
             push_node(child);
@@ -3570,6 +3574,8 @@ struct instance_synthesizer {
 
         // 3. try rules
         while (cur_node().m_rule_idx < entry.m_rules.size()) {
+            new_inst_mvars.clear();
+
             unsigned idx = cur_node().m_rule_idx++;
             lean_trace(name({"type_context", "class", "try_rule"}),
                        tout() << idx << "\n";);
@@ -3607,6 +3613,7 @@ struct instance_synthesizer {
 
     instance_synthesizer(type_context_old & ctx):
         m_ctx(ctx),
+        m_alpha_norm_tmp_prefix(name::mk_internal_unique_name()),
         m_displayed_trace_header(false),
         m_old_transparency_mode(m_ctx.m_transparency_mode),
         m_old_zeta(m_ctx.m_zeta) {
@@ -3727,7 +3734,7 @@ struct instance_synthesizer {
             return false;
 
         if (rule_idx) {
-            table_entry & entry = m_table.find(cur_node().cur_goal().m_anorm_goal_type)->second;
+            table_entry & entry = m_table.find(cur_node().m_anorm_cur_goal_type)->second;
             lean_trace(name({"type_context", "class", "set_used"}),
                        tout() << "(" << entry.m_anorm_goal_type << ")." << *rule_idx << "\n";);
             entry.m_rules[*rule_idx].m_status = rule_status::USED;
@@ -3778,7 +3785,8 @@ struct instance_synthesizer {
     optional<expr> mk_class_instance_core(expr const & type) {
         /* We do not cache results when multiple instances have to be generated. */
         m_main_mvar      = m_ctx.mk_tmp_mvar(type);
-        node root(to_list(mk_goal(m_main_mvar)));
+        node root(to_list(goal(m_main_mvar)));
+        root.m_anorm_cur_goal_type = anorm(m_ctx.infer(root.cur_goal().m_mvar));
         push_node(root);
         auto r = search();
         return ensure_no_meta(r);
@@ -4085,6 +4093,7 @@ void initialize_type_context() {
     register_trace_class(name({"type_context", "class", "try_rule"}));
     register_trace_class(name({"type_context", "class", "unify"}));
     register_trace_class(name({"type_context", "class", "no_unify"}));
+    register_trace_class(name({"type_context", "class", "new_goal"}));
     register_trace_class(name({"type_context", "class", "store_answer"}));
     register_trace_class(name({"type_context", "class", "found_answer"}));
     register_trace_class(name({"type_context", "class", "fail"}));
