@@ -3364,6 +3364,7 @@ struct instance_synthesizer {
     };
 
     struct node {
+        expr       m_anorm_cur_goal; // just to cache it
         list<goal> m_goals;
         unsigned   m_answer_idx{0};
         unsigned   m_local_idx{0};
@@ -3372,22 +3373,30 @@ struct instance_synthesizer {
         bool no_goals() const { return empty(m_goals); }
         goal const & cur_goal() const { return head(m_goals); }
 
-        node(list<goal> const & goals):
-            m_goals(goals) {}
+        node(list<goal> const & goals): m_goals(goals) {
+            if (!empty(m_goals)) {
+                m_anorm_cur_goal = anorm(cur_goal());
+            }
+        }
     };
 
     // TODO(dselsam): confirm that I don't need "ACTIVE"
-    enum class inst_status { UNUSED, USED };
+    enum class rule_status { UNUSED, USED };
+
+    struct rule {
+        bool        m_is_expr;
+        name        m_inst_name;
+        expr        m_inst_val;
+        rule_status m_status{rule_status::UNUSED};
+
+        rule(name const & n): is_expr(false), inst_name(n) {}
+        rule(expr const & v): is_expr(true),  inst(v) {}
+    };
 
     struct table_entry {
         expr                m_anorm_goal_type;
         buffer<expr>        m_answers;
-
-        buffer<expr>        m_local_insts;
-        buffer<inst_status> m_local_statuses;
-
-        buffer<name>        m_global_insts;
-        buffer<inst_status> m_global_statuses;
+        buffer<rule>        m_rules;
     };
 
     typedef rb_expr_map<table_entry> answer_table;
@@ -3415,14 +3424,15 @@ struct instance_synthesizer {
         entry.m_anorm_goal_type = anorm_goal_type;
 
         if (auto cname = m_ctx.is_class(anorm_goal_type)) {
-            get_local_instances(*cname, entry.m_local_insts);
-            for (unsigned i = 0; i < entry.m_local_insts.size(); ++i) {
-                entry.m_local_statuses.push_back(inst_status::UNUSED);
+            for (local_instance const & li : m_ctx.m_local_instances) {
+                if (li.get_class_name() == cname) {
+                    entry.m_rules.emplace_back(li.get_local());
+                }
             }
-
-            to_buffer(get_class_instances(env(), *cname), entry.m_global_insts);
-            for (unsigned i = 0; i < entry.m_global_insts.size(); ++i) {
-                entry.m_global_statuses.push_back(inst_status::UNUSED);
+            buffer<name> inst_names;
+            to_buffer(get_class_instances(env(), *cname), inst_names);
+            for (name const & inst_name : inst_names) {
+                entry.m_rules.emplace_back(inst_name);
             }
         }
         return entry;
@@ -3482,6 +3492,16 @@ struct instance_synthesizer {
             lean_assert(new_inst_mvars.empty());
             push_child_node();
             return true;
+        }
+
+        // 2. check for ancestor
+        if (entry.ancestors.contains(anorm_goal_type)) {
+            int idx = m_stack.size() - 2;
+            while (idx >= 0) {
+                if (
+            }
+
+
         }
 
         // 2. try local instances
