@@ -3349,8 +3349,8 @@ struct instance_synthesizer {
     typedef rb_expr_tree ancestor_set;
 
     struct goal {
-	expr      m_mvar;
-	ancestors m_ancestors;
+        expr      m_mvar;
+        ancestors m_ancestors;
 
         goal(expr const & m):
             m_mvar(m) {}
@@ -3358,35 +3358,35 @@ struct instance_synthesizer {
         goal(expr const & m, ancestors const & a):
             m_mvar(m), m_ancestors(a) {}
 
-	unsigned get_depth() const {
-	    return m_ancestors.size();
-	}
+        unsigned get_depth() const {
+            return m_ancestors.size();
+        }
     };
 
     struct node {
-	list<goal> m_goals;
-	unsigned   m_answer_idx{0};
-	unsigned   m_local_idx{0};
-	unsigned   m_global_idx{0};
+        list<goal> m_goals;
+        unsigned   m_answer_idx{0};
+        unsigned   m_local_idx{0};
+        unsigned   m_global_idx{0};
 
-	bool no_goals() const { return empty(m_goals); }
-	goal const & cur_goal() const { return head(m_goals); }
+        bool no_goals() const { return empty(m_goals); }
+        goal const & cur_goal() const { return head(m_goals); }
 
-	node(list<goal> const & goals):
-	    m_goals(goals) {}
+        node(list<goal> const & goals):
+            m_goals(goals) {}
     };
 
     enum class inst_status { UNUSED, ACTIVE, USED };
 
     struct table_entry {
-	expr                m_anorm_goal_type;
-	buffer<expr>        m_answers;
+        expr                m_anorm_goal_type;
+        buffer<expr>        m_answers;
 
-	buffer<expr>        m_local_insts;
-	buffer<inst_status> m_local_statuses;
+        buffer<expr>        m_local_insts;
+        buffer<inst_status> m_local_statuses;
 
-	buffer<name>        m_global_insts;
-	buffer<inst_status> m_global_statuses;
+        buffer<name>        m_global_insts;
+        buffer<inst_status> m_global_statuses;
     };
 
     typedef rb_expr_map<table_entry> answer_table;
@@ -3395,18 +3395,18 @@ struct instance_synthesizer {
     table                 m_table;
 
     node const & cur_node() const {
-	lean_assert(!m_stack.empty());
-	return m_stack.back();
+        lean_assert(!m_stack.empty());
+        return m_stack.back();
     }
 
     node & cur_node() const {
-	lean_assert(!m_stack.empty());
-	return m_stack.back();
+        lean_assert(!m_stack.empty());
+        return m_stack.back();
     }
 
     void push_node(node const & n) {
-	m_stack.push_back(n);
-	push_scope();
+        m_stack.push_back(n);
+        push_scope();
     }
 
     table_entry create_table_entry_for(expr const & anorm_goal_type) {
@@ -3414,110 +3414,110 @@ struct instance_synthesizer {
         if (!cname)
             return false;
 
-	table_entry entry;
-	entry.anorm_goal_type = anorm_goal_type;
+        table_entry entry;
+        entry.anorm_goal_type = anorm_goal_type;
 
-	get_local_instances(*cname, entry.m_local_insts);
-	for (unsigned i = 0; i < entry.m_local_insts.size(); ++i) {
-	    entry.m_local_statuses.push_back(inst_status::UNUSED);
-	}
+        get_local_instances(*cname, entry.m_local_insts);
+        for (unsigned i = 0; i < entry.m_local_insts.size(); ++i) {
+            entry.m_local_statuses.push_back(inst_status::UNUSED);
+        }
 
-	to_buffer(get_class_instances(env(), *cname), entry.m_global_insts);
-	for (unsigned i = 0; i < entry.m_global_insts.size(); ++i) {
-	    entry.m_global_statuses.push_back(inst_status::UNUSED);
-	}
+        to_buffer(get_class_instances(env(), *cname), entry.m_global_insts);
+        for (unsigned i = 0; i < entry.m_global_insts.size(); ++i) {
+            entry.m_global_statuses.push_back(inst_status::UNUSED);
+        }
 
         if (entry.m_local_insts.size() + entry.m_global_insts.size() == 0) {
             return false;
-	}
-	return entry;
+        }
+        return entry;
     }
 
     expr anorm(expr const & goal_type) {
-	// TODO(dselsam): alpha-normalize!
-	// Note: when this is the identity function, there is no loop-detection and caching
-	// However, it will be useful for now to confirm that we have preserved semantics of the
-	// old resolution engine.
-	return goal_type;
+        // TODO(dselsam): alpha-normalize!
+        // Note: when this is the identity function, there is no loop-detection and caching
+        // However, it will be useful for now to confirm that we have preserved semantics of the
+        // old resolution engine.
+        return goal_type;
     }
 
     // false if we need to backtrack
     bool expand_cur_node() {
-	lean_assert(!no_goals());
-	expr goal_type = m_ctx.instantiate_mvars(m_ctx.infer(cur_goal().m_mvar));
-	expr anorm_goal_type = anorm(goal_type);
-	table_entry entry;
-	if (auto oentry = m_table.find(anorm_goal_type)) {
-	    entry = *oentry;
-	} else {
-	    entry = create_table_entry_for(anorm_goal_type);
-	    m_table.insert(anorm_goal_type, *entry);
-	}
-	lean_assert(m_table.contains(anorm_goal_type));
+        lean_assert(!no_goals());
+        expr goal_type = m_ctx.instantiate_mvars(m_ctx.infer(cur_goal().m_mvar));
+        expr anorm_goal_type = anorm(goal_type);
+        table_entry entry;
+        if (auto oentry = m_table.find(anorm_goal_type)) {
+            entry = *oentry;
+        } else {
+            entry = create_table_entry_for(anorm_goal_type);
+            m_table.insert(anorm_goal_type, *entry);
+        }
+        lean_assert(m_table.contains(anorm_goal_type));
 
-	buffer<expr> new_inst_mvars;
+        buffer<expr> new_inst_mvars;
 
-	auto push_child_node = [&]() {
-	    // TODO(dselsam): if there are no new goals, and the answer has no metas,
-	    // then store it in the table.
-	    // As for `anorm` above, without this step the semantics should be the
-	    // same as the original.
+        auto push_child_node = [&]() {
+            // TODO(dselsam): if there are no new goals, and the answer has no metas,
+            // then store it in the table.
+            // As for `anorm` above, without this step the semantics should be the
+            // same as the original.
 
-	    node child(cur_node().m_goals.tail());
+            node child(cur_node().m_goals.tail());
 
-	    ancestor_set new_ancestors = cur_node().cur_goal().ancestors;
-	    new_ancestors.insert(anorm_goal_type);
+            ancestor_set new_ancestors = cur_node().cur_goal().ancestors;
+            new_ancestors.insert(anorm_goal_type);
 
-	    unsigned i = new_inst_mvars.size();
+            unsigned i = new_inst_mvars.size();
 
-	    while (i > 0) {
-		--i;
-		child.m_goals = cons(goal(new_inst_mvars[i], new_ancestors), child.m_goals);
-	    }
+            while (i > 0) {
+                --i;
+                child.m_goals = cons(goal(new_inst_mvars[i], new_ancestors), child.m_goals);
+            }
 
-	    push_node(child);
-	}
+            push_node(child);
+        }
 
-	// 1. try answers
-	if (cur_node().m_answer_idx < entry.m_answers) {
-	    unsigned idx = cur_node().m_answer_idx++;
-	    expr answer      = entry.m_answers[idx];
-	    expr answer_type = m_ctx.infer(answer);
-	    lean_verify(try_instance(answer, answer_type, new_inst_mvars));
-	    lean_assert(new_inst_mvars.empty());
-	    push_child_node();
-	    return true;
-	}
+        // 1. try answers
+        if (cur_node().m_answer_idx < entry.m_answers) {
+            unsigned idx = cur_node().m_answer_idx++;
+            expr answer      = entry.m_answers[idx];
+            expr answer_type = m_ctx.infer(answer);
+            lean_verify(try_instance(answer, answer_type, new_inst_mvars));
+            lean_assert(new_inst_mvars.empty());
+            push_child_node();
+            return true;
+        }
 
-	// 2. try local instances
-	while (cur_node().m_local_idx < entry.m_local_insts.size()) {
-	    unsigned idx = cur_node().m_local_idx++;
+        // 2. try local instances
+        while (cur_node().m_local_idx < entry.m_local_insts.size()) {
+            unsigned idx = cur_node().m_local_idx++;
 
-	    // TODO(dselsam): do ancestor test!
-	    if (entry.m_local_statuses[idx] != inst_status::USED) {
-		expr inst = entry.m_local_insts[idx];
-		expr inst_type = m_ctx.infer(inst);
-		if (try_instance(inst, inst_type, new_inst_mvars)) {
-		    push_child_node();
-		    return true;
-		}
-	    }
-	}
+            // TODO(dselsam): do ancestor test!
+            if (entry.m_local_statuses[idx] != inst_status::USED) {
+                expr inst = entry.m_local_insts[idx];
+                expr inst_type = m_ctx.infer(inst);
+                if (try_instance(inst, inst_type, new_inst_mvars)) {
+                    push_child_node();
+                    return true;
+                }
+            }
+        }
 
-	// 3. try global instances
-	while (cur_node().m_global_idx < entry.m_global_insts.size()) {
-	    unsigned idx = cur_node().m_global_idx++;
+        // 3. try global instances
+        while (cur_node().m_global_idx < entry.m_global_insts.size()) {
+            unsigned idx = cur_node().m_global_idx++;
 
-	    // TODO(dselsam): do ancestor test!
-	    if (entry.m_global_statuses[idx] != inst_status::USED) {
-		if (try_instance(entry.m_global_insts[idx], new_inst_mvars)) {
-		    push_child_node();
-		    return true;
-		}
-	    }
-	}
+            // TODO(dselsam): do ancestor test!
+            if (entry.m_global_statuses[idx] != inst_status::USED) {
+                if (try_instance(entry.m_global_insts[idx], new_inst_mvars)) {
+                    push_child_node();
+                    return true;
+                }
+            }
+        }
 
-	return false;
+        return false;
     }
 
     // END NEW
@@ -3638,8 +3638,8 @@ struct instance_synthesizer {
     }
 
     bool backtrack() {
-	// TODO(dselsam): confirm it can't be empty
-	// (Leo checks here and returns false)
+        // TODO(dselsam): confirm it can't be empty
+        // (Leo checks here and returns false)
         lean_assert(!m_stack.empty());
 
         while (true) {
@@ -3647,9 +3647,9 @@ struct instance_synthesizer {
             pop_scope();
             if (m_stack.empty())
                 return false;
-	    // TODO(dselsam): not sure why Leo does pop;pop;push
+            // TODO(dselsam): not sure why Leo does pop;pop;push
             pop_scope(); push_scope(); // restore assignment
-	    return true;
+            return true;
         }
     }
 
@@ -3658,7 +3658,7 @@ struct instance_synthesizer {
             if (!expand_cur_node()) {
                 if (!backtrack()) {
                     return none_expr();
-		}
+                }
             }
         }
         return some_expr(m_ctx.instantiate_mvars(m_main_mvar));
@@ -3683,10 +3683,10 @@ struct instance_synthesizer {
                        scope_trace_env scope(m_ctx.env(), m_ctx);
                        tout() << "trying next solution, current solution has metavars\n" << *r << "\n";);
 
-	    // TODO(dselsam): leo has special support for next solution,
-	    // possibly because he doesn't create the node with no goals.
-	    // Confirm.
-	    backtrack();
+            // TODO(dselsam): leo has special support for next solution,
+            // possibly because he doesn't create the node with no goals.
+            // Confirm.
+            backtrack();
             r = search();
         }
     }
@@ -3694,8 +3694,8 @@ struct instance_synthesizer {
     optional<expr> mk_class_instance_core(expr const & type) {
         /* We do not cache results when multiple instances have to be generated. */
         m_main_mvar      = m_ctx.mk_tmp_mvar(type);
-	node root(0, to_list(goal(m_main_mvar)));
-	push_node(root);
+        node root(0, to_list(goal(m_main_mvar)));
+        push_node(root);
         auto r = search();
         return ensure_no_meta(r);
     }
