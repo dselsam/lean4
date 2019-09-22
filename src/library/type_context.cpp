@@ -3349,7 +3349,7 @@ struct instance_synthesizer {
     typedef rb_expr_tree ancestor_set;
 
     struct goal {
-        expr      m_mvar;
+	expr      m_mvar;
 	ancestors m_ancestors;
 
         goal(expr const & m):
