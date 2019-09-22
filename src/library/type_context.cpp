@@ -3376,7 +3376,8 @@ struct instance_synthesizer {
             m_goals(goals) {}
     };
 
-    enum class inst_status { UNUSED, ACTIVE, USED };
+    // TODO(dselsam): confirm that I don't need "ACTIVE"
+    enum class inst_status { UNUSED, USED };
 
     struct table_entry {
         expr                m_anorm_goal_type;
@@ -3493,6 +3494,7 @@ struct instance_synthesizer {
                 expr inst_type = m_ctx.infer(inst);
                 if (try_instance(inst, inst_type, new_inst_mvars)) {
                     push_child_node();
+                    entry.m_local_statuses[idx] = inst_status::USED;;
                     return true;
                 }
             }
@@ -3506,6 +3508,7 @@ struct instance_synthesizer {
             if (entry.m_global_statuses[idx] != inst_status::USED) {
                 if (try_instance(entry.m_global_insts[idx], new_inst_mvars)) {
                     push_child_node();
+                    entry.m_global_statuses[idx] = inst_status::USED;
                     return true;
                 }
             }
