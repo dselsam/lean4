@@ -3349,13 +3349,13 @@ struct instance_synthesizer {
     typedef rb_expr_tree ancestor_set;
 
     struct goal {
-        expr      m_mvar;
-        ancestors m_ancestors;
+        expr         m_mvar;
+        ancestor_set m_ancestors;
 
         goal(expr const & m):
             m_mvar(m) {}
 
-        goal(expr const & m, ancestors const & a):
+        goal(expr const & m, ancestor_set const & a):
             m_mvar(m), m_ancestors(a) {}
 
         unsigned get_depth() const {
@@ -3392,14 +3392,14 @@ struct instance_synthesizer {
     typedef rb_expr_map<table_entry> answer_table;
 
     buffer<node>          m_stack;
-    table                 m_table;
+    answer_table          m_table;
 
     node const & cur_node() const {
         lean_assert(!m_stack.empty());
         return m_stack.back();
     }
 
-    node & cur_node() const {
+    node & cur_node() {
         lean_assert(!m_stack.empty());
         return m_stack.back();
     }
@@ -3410,25 +3410,19 @@ struct instance_synthesizer {
     }
 
     table_entry create_table_entry_for(expr const & anorm_goal_type) {
-        auto cname = m_ctx.is_class(anorm_goal_type);
-        if (!cname)
-            return false;
-
         table_entry entry;
-        entry.anorm_goal_type = anorm_goal_type;
+        entry.m_anorm_goal_type = anorm_goal_type;
 
-        get_local_instances(*cname, entry.m_local_insts);
-        for (unsigned i = 0; i < entry.m_local_insts.size(); ++i) {
-            entry.m_local_statuses.push_back(inst_status::UNUSED);
-        }
+        if (auto cname = m_ctx.is_class(anorm_goal_type)) {
+            get_local_instances(*cname, entry.m_local_insts);
+            for (unsigned i = 0; i < entry.m_local_insts.size(); ++i) {
+                entry.m_local_statuses.push_back(inst_status::UNUSED);
+            }
 
-        to_buffer(get_class_instances(env(), *cname), entry.m_global_insts);
-        for (unsigned i = 0; i < entry.m_global_insts.size(); ++i) {
-            entry.m_global_statuses.push_back(inst_status::UNUSED);
-        }
-
-        if (entry.m_local_insts.size() + entry.m_global_insts.size() == 0) {
-            return false;
+            to_buffer(get_class_instances(env(), *cname), entry.m_global_insts);
+            for (unsigned i = 0; i < entry.m_global_insts.size(); ++i) {
+                entry.m_global_statuses.push_back(inst_status::UNUSED);
+            }
         }
         return entry;
     }
@@ -3443,15 +3437,15 @@ struct instance_synthesizer {
 
     // false if we need to backtrack
     bool expand_cur_node() {
-        lean_assert(!no_goals());
-        expr goal_type = m_ctx.instantiate_mvars(m_ctx.infer(cur_goal().m_mvar));
+        lean_assert(!cur_node().no_goals());
+        expr goal_type = m_ctx.instantiate_mvars(m_ctx.infer(cur_node().cur_goal().m_mvar));
         expr anorm_goal_type = anorm(goal_type);
         table_entry entry;
         if (auto oentry = m_table.find(anorm_goal_type)) {
             entry = *oentry;
         } else {
             entry = create_table_entry_for(anorm_goal_type);
-            m_table.insert(anorm_goal_type, *entry);
+            m_table.insert(anorm_goal_type, entry);
         }
         lean_assert(m_table.contains(anorm_goal_type));
 
@@ -3463,9 +3457,9 @@ struct instance_synthesizer {
             // As for `anorm` above, without this step the semantics should be the
             // same as the original.
 
-            node child(cur_node().m_goals.tail());
+            node child(tail(cur_node().m_goals));
 
-            ancestor_set new_ancestors = cur_node().cur_goal().ancestors;
+            ancestor_set new_ancestors = cur_node().cur_goal().m_ancestors;
             new_ancestors.insert(anorm_goal_type);
 
             unsigned i = new_inst_mvars.size();
@@ -3476,10 +3470,10 @@ struct instance_synthesizer {
             }
 
             push_node(child);
-        }
+        };
 
         // 1. try answers
-        if (cur_node().m_answer_idx < entry.m_answers) {
+        if (cur_node().m_answer_idx < entry.m_answers.size()) {
             unsigned idx = cur_node().m_answer_idx++;
             expr answer      = entry.m_answers[idx];
             expr answer_type = m_ctx.infer(answer);
@@ -3540,7 +3534,7 @@ struct instance_synthesizer {
     }
 
     ~instance_synthesizer() {
-        for (unsigned i = 0; i < m_choices.size(); i++) {
+        for (unsigned i = 0; i < m_stack.size(); i++) {
             m_ctx.pop_scope();
         }
         m_ctx.m_transparency_mode = m_old_transparency_mode;
@@ -3561,9 +3555,9 @@ struct instance_synthesizer {
 
     void trace(unsigned depth, expr const & mvar, expr const & mvar_type, expr const & r) {
         auto out = tout();
-        if (!m_displayed_trace_header && m_choices.size() == 1) {
+        if (!m_displayed_trace_header && m_stack.size() == 1) {
             out << tclass("class_instances");
-            out << " class-instance resolution trace" << endl;
+            out << " [DHS] class-instance resolution trace" << endl;
             m_displayed_trace_header = true;
         }
         out << tclass("class_instances") << "(" << depth << ") ";
@@ -3601,7 +3595,7 @@ struct instance_synthesizer {
             }
             lean_trace_plain("class_instances",
                              scope_trace_env scope(m_ctx.env(), m_ctx);
-                             trace(e.m_depth, mk_app(mvar, locals.as_buffer()), mvar_type, r););
+                             trace(cur_node().cur_goal().get_depth(), mk_app(mvar, locals.as_buffer()), mvar_type, r););
             if (!m_ctx.is_def_eq(mvar_type, type)) {
                 lean_trace_plain("class_instances", tout() << "failed is_def_eq\n";);
                 return false;
@@ -3624,13 +3618,13 @@ struct instance_synthesizer {
             levels ls(ls_buffer);
             expr inst_cnst = mk_constant(inst_name, ls);
             expr inst_type = instantiate_type_lparams(*decl, ls);
-            return try_instance(e, inst_cnst, inst_type);
+            return try_instance(inst_cnst, inst_type, new_inst_mvars);
         } else {
             return false;
         }
     }
 
-    void get_local_instances(name const & cname, buffer<name> & local_insts) {
+    void get_local_instances(name const & cname, buffer<expr> & local_insts) {
         for (local_instance const & li : m_ctx.m_local_instances) {
             if (li.get_class_name() == cname)
                 local_insts.push_back(li.get_local());
@@ -3694,7 +3688,7 @@ struct instance_synthesizer {
     optional<expr> mk_class_instance_core(expr const & type) {
         /* We do not cache results when multiple instances have to be generated. */
         m_main_mvar      = m_ctx.mk_tmp_mvar(type);
-        node root(0, to_list(goal(m_main_mvar)));
+        node root(to_list(goal(m_main_mvar)));
         push_node(root);
         auto r = search();
         return ensure_no_meta(r);
