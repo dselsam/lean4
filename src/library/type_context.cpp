@@ -3351,29 +3351,56 @@ struct instance_synthesizer {
     name m_alpha_norm_tmp_prefix{name::mk_internal_unique_name()};
 
     // TODO(dselsam): better place to put it
+
     expr anorm(expr const & goal_type) {
         // TODO(dselsam): alpha-normalize!
         // Note: when this is the identity function, there is no loop-detection and caching
         // However, it will be useful for now to confirm that we have preserved semantics of the
         // old resolution engine.
-        std::unordered_map<unsigned, unsigned> tmp_mvar_to_new_id;
 
         expr pre_norm = m_ctx.instantiate_mvars(goal_type);
+
+        std::unordered_map<unsigned, unsigned> lidx_to_new_id;
+        std::unordered_map<unsigned, unsigned> eidx_to_new_id;
+
+        auto level_anorm = [&](level const & l) {
+            if (!is_idx_metauniv(l)) return optional<level>();
+
+            if (!lidx_to_new_id.count(to_meta_idx(l)))
+                lidx_to_new_id[to_meta_idx(l)] = lidx_to_new_id.size();
+
+            auto iter = lidx_to_new_id.find(to_meta_idx(l));
+            return optional<level>(mk_univ_mvar(m_alpha_norm_tmp_prefix.append_after(iter->second)));
+        };
+
         expr post_norm = replace(pre_norm, [&](expr const & e) {
-            if (!is_idx_metavar(e)) return optional<expr>();
+                // TODO(dselsam): do metavars have types? It is confusing.
+                if (is_constant(e)) {
+                    buffer<level> lvls;
+                    to_buffer(const_levels(e), lvls);
+                    for (level & lvl : lvls) lvl = replace(lvl, level_anorm);
+                    return some(update_constant(e, to_list_ref(lvls)));
+                } else if (!is_idx_metavar(e)) {
+                    return optional<expr>();
+                } else {
+                    if (!eidx_to_new_id.count(to_meta_idx(e))) {
+                        eidx_to_new_id[to_meta_idx(e)] = eidx_to_new_id.size();
+                    }
 
-            if (!tmp_mvar_to_new_id.count(to_meta_idx(e))) {
-                tmp_mvar_to_new_id[to_meta_idx(e)] = tmp_mvar_to_new_id.size();
-            }
-
-            auto iter = tmp_mvar_to_new_id.find(to_meta_idx(e));
-            return optional<expr>(mk_constant(m_alpha_norm_tmp_prefix.append_after(iter->second)));
+                    auto iter = eidx_to_new_id.find(to_meta_idx(e));
+                    return optional<expr>(mk_constant(m_alpha_norm_tmp_prefix.append_after(iter->second)));
+                }
             });
         lean_trace(name({"type_context", "class", "alpha_norm"}),
                    tout() << pre_norm << " ==> " << post_norm << "\n";);
         return post_norm;
     }
 
+    // TODO(dselsam): URGENT we need a third kind of goal for MEMO/LOOKUP
+    // How do we handle the delayed instantiation?
+    // push_scope() whenever we resolve (including with an answer),
+    // pop_scope() whenever we store?
+    // No, we would need to store the scope.
     struct goal {
         expr         m_anorm_goal_type;
         expr         m_mvar;
@@ -3502,7 +3529,9 @@ struct instance_synthesizer {
             child.m_parent_rule_idx = parent_rule_idx;
 
             ancestors new_ancestors = cur_node().cur_goal().m_ancestors;
+            lean_trace(name({"type_context", "class", "new_ancestors"}), tout() << anorm_goal_type << "\n";);
             new_ancestors.insert(anorm_goal_type, m_stack.size()-1);
+            lean_assert(new_ancestors.contains(anorm_goal_type));
 
             unsigned i = new_inst_mvars.size();
 
@@ -3516,12 +3545,12 @@ struct instance_synthesizer {
 
         // 1. try answers
         if (cur_node().m_answer_idx < entry.m_answers.size()) {
-            unsigned idx = cur_node().m_answer_idx++;
+            unsigned idx     = cur_node().m_answer_idx++;
             expr answer      = entry.m_answers[idx];
             expr answer_type = m_ctx.infer(answer);
             lean_verify(try_instance(answer, answer_type, new_inst_mvars));
             lean_assert(new_inst_mvars.empty());
-            lean_trace(name({"type_context", "class", "find_answer"}), tout() << answer << " : " << answer_type << "\n";);
+            lean_trace(name({"type_context", "class", "found_answer"}), tout() << answer << " : " << answer_type << "\n";);
             push_child_node(optional<unsigned>());
             return true;
         }
@@ -3530,6 +3559,13 @@ struct instance_synthesizer {
         if (auto stack_idx = cur_node().cur_goal().m_ancestors.find(anorm_goal_type)) {
             cur_node().m_rule_idx = m_stack[*stack_idx].m_rule_idx + 1;
             lean_trace(name({"type_context", "class", "loop"}), tout() << "start at: " << cur_node().m_rule_idx << "\n";);
+        } else {
+            lean_trace(name({"type_context", "class", "loop"}),
+                       tout() << "no loop found for " << anorm_goal_type << " out of " << cur_node().cur_goal().m_ancestors.size() << "\n";);
+            cur_node().cur_goal().m_ancestors.for_each([&](expr const & e, unsigned idx) {
+                    lean_trace(name({"type_context", "class", "loop"}),
+                               tout() << "ANCESTOR: " << e << " @ " << idx << "\n";);
+                });
         }
 
         // 3. try rules
@@ -3547,13 +3583,6 @@ struct instance_synthesizer {
             if (r.m_is_expr
                 ? try_instance(r.m_inst_expr, m_ctx.infer(r.m_inst_expr), new_inst_mvars)
                 : try_instance(r.m_inst_name, new_inst_mvars)) {
-                if (new_inst_mvars.empty()) {
-                    expr answer = m_ctx.instantiate_mvars(cur_node().cur_goal().m_mvar);
-                    lean_trace(name({"type_context", "class", "store_answer"}),
-                               tout() << answer << " : " << m_ctx.instantiate_mvars(m_ctx.infer(answer)) << "\n";);
-                    entry.m_answers.push_back(answer);
-                }
-
                 lean_trace(name({"type_context", "class", "unify"}), tout() << idx << "\n";);
                 push_child_node(optional<unsigned>(idx));
                 return true;
@@ -4057,10 +4086,11 @@ void initialize_type_context() {
     register_trace_class(name({"type_context", "class", "unify"}));
     register_trace_class(name({"type_context", "class", "no_unify"}));
     register_trace_class(name({"type_context", "class", "store_answer"}));
-    register_trace_class(name({"type_context", "class", "find_answer"}));
+    register_trace_class(name({"type_context", "class", "found_answer"}));
     register_trace_class(name({"type_context", "class", "fail"}));
     register_trace_class(name({"type_context", "class", "backtrack"}));
     register_trace_class(name({"type_context", "class", "set_used"}));
+    register_trace_class(name({"type_context", "class", "new_ancestors"}));
     register_trace_class("type_context_cache");
 }
 
