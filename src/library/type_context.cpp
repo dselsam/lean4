@@ -3401,8 +3401,6 @@ struct instance_synthesizer {
 	return m_stack.back();
     }
 
-    node create_child_node(
-
     table_entry create_table_entry_for(expr const & anorm_goal_type) {
         auto cname = m_ctx.is_class(anorm_goal_type);
         if (!cname)
@@ -3441,12 +3439,33 @@ struct instance_synthesizer {
 	}
 	lean_assert(m_table.contains(anorm_goal_type));
 
+	buffer<expr> new_inst_mvars;
+
+	auto push_child_node = [&]() {
+	    node child;
+	    // TODO(dselsam): put depth in the goal, not the node
+	    child.m_depth = cur_node().m_depth + 1;
+	    child.m_goals = cur_node().m_goals.tail();
+	    unsigned i = new_inst_mvars.size();
+
+	    ancestor_set new_ancestors = cur_node().cur_goal().ancestors;
+	    new_ancestors.insert(anorm_goal_type);
+	    while (i > 0) {
+		--i;
+		child.m_goals = cons(goal(new_inst_mvars[i], new_ancestors), child.m_goals);
+	    }
+
+	    m_stack.push_back(child);
+	}
+
 	// 1. try answers
 	if (cur_node().m_answer_idx < entry.m_answers) {
 	    unsigned idx = cur_node().m_answer_idx++;
 	    expr answer      = entry.m_answers[idx];
 	    expr answer_type = m_ctx.infer(answer);
-	    lean_verify(try_instance(answer, answer_type));
+	    lean_verify(try_instance(answer, answer_type, new_inst_mvars));
+	    lean_assert(new_inst_mvars.empty());
+	    push_child_node();
 	    return true;
 	}
 
@@ -3458,7 +3477,8 @@ struct instance_synthesizer {
 	    if (entry.m_local_statuses[idx] != inst_status::USED) {
 		expr inst = entry.m_local_insts[idx];
 		expr inst_type = m_ctx.infer(inst);
-		if (try_instance(inst, inst_type)) {
+		if (try_instance(inst, inst_type, new_inst_mvars)) {
+		    push_child_node();
 		    return true;
 		}
 	    }
@@ -3470,7 +3490,8 @@ struct instance_synthesizer {
 
 	    // TODO(dselsam): do ancestor test!
 	    if (entry.m_global_statuses[idx] != inst_status::USED) {
-		if (try_instance(entry.m_global_insts[idx])) {
+		if (try_instance(entry.m_global_insts[idx], new_inst_mvars)) {
+		    push_child_node();
 		    return true;
 		}
 	    }
@@ -3530,10 +3551,10 @@ struct instance_synthesizer {
     }
 
     /* Try to synthesize e.m_mvar using instance inst : inst_type. */
-    bool try_instance(stack_entry const & e, expr const & inst, expr const & inst_type) {
+    bool try_instance(expr const & inst, expr const & inst_type, buffer<expr> & new_inst_mvars) {
         try {
             type_context_old::tmp_locals locals(m_ctx);
-            expr const & mvar = e.m_mvar;
+            expr const & mvar = cur_node().cur_goal().m_mvar;
             expr mvar_type    = m_ctx.infer(mvar);
             while (true) {
                 expr new_mvar_type = m_ctx.relaxed_whnf(mvar_type);
@@ -3545,7 +3566,6 @@ struct instance_synthesizer {
             }
             expr type  = inst_type;
             expr r     = inst;
-            buffer<expr> new_inst_mvars;
             while (true) {
                 expr new_type = m_ctx.relaxed_whnf(type);
                 if (!is_pi(new_type))
@@ -3568,12 +3588,6 @@ struct instance_synthesizer {
             }
             r = locals.mk_lambda(r);
             m_ctx.assign(mvar, r);
-            // copy new_inst_mvars to stack
-            unsigned i = new_inst_mvars.size();
-            while (i > 0) {
-                --i;
-                m_state.m_stack = cons(stack_entry(new_inst_mvars[i], e.m_depth+1), m_state.m_stack);
-            }
             return true;
         } catch (exception & ex) {
             lean_trace_plain("class_instances", tout() << "exception: " << ex.what() << "\n";);
@@ -3581,7 +3595,7 @@ struct instance_synthesizer {
         }
     }
 
-    bool try_instance(stack_entry const & e, name const & inst_name) {
+    bool try_instance(name const & inst_name, buffer<expr> & new_inst_mvars) {
         if (auto decl = env().find(inst_name)) {
             buffer<level> ls_buffer;
             unsigned num_lparams = decl->get_num_lparams();
