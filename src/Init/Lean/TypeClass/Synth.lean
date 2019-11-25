@@ -145,6 +145,7 @@ partial def introduceMVars (lctx : LocalContext) (locals : Array Expr) : Context
 partial def introduceLocals : Nat → LocalContext → Array Expr → Expr → LocalContext × Expr × Array Expr
 | nextIdx, lctx, ls, Expr.forallE name domain body c =>
   let info := c.binderInfo;
+  -- TODO(dselsam): does this prefix need to reflect nesting depth?
   let idxName : Name := mkNameNum `_tmp nextIdx;
   let lctx := lctx.mkLocalDecl idxName name domain info;
   let l : Expr := mkFVar idxName;
@@ -191,7 +192,10 @@ do lookupStatus ← get >>= λ ϕ => pure $ ϕ.tableEntries.find anormSubgoal;
    match lookupStatus with
    | none       => throw $ "[newAnswer]: " ++ toString anormSubgoal ++ " not found in table!"
    | some entry => do
+     -- TODO(dselsam): this becomes a simultaneous trie lookup/insert.
      if entry.answers.any (λ answer₁ => Context.αNorm (answer₁.typedExpr.type) == Context.αNorm (answer.typedExpr.type)) then pure ()
+     -- TODO(dselsam): if we are keeping the tables as a cache, then we will want to store the solutions with metavars for
+     -- the root goal as well (though still not accept them as solutions to the given query).
      else if entry.waiters.any Waiter.isRoot
              && (Context.eHasTmpMVar answer.typedExpr.type || Context.eHasTmpMVar answer.typedExpr.val) then pure()
      else do
@@ -205,6 +209,9 @@ do cNode ← get >>= λ ϕ => pure ϕ.consumerStack.peek!;
    match cNode.remainingSubgoals with
    | [] => do
      let answer : Answer := {
+       -- TODO(dselsam): the context here is stored just for the declarations of the unbound metavariables,
+       -- all of which will have the same local contexts for every answer.
+       -- So we may be able to store less information than the entire MetavarContext.
        ctx := cNode.ctx,
        typedExpr := {
          val  := cNode.ctx.eInstantiate cNode.futureAnswer.val,
@@ -213,12 +220,14 @@ do cNode ← get >>= λ ϕ => pure ϕ.consumerStack.peek!;
      newAnswer cNode.anormSubgoal answer
 
    | mvar::rest => do
+     -- TODO(dselsam): this becomes a trie lookup.
      let anormSubgoal : Expr := Context.αNorm (cNode.ctx.eInstantiate $ cNode.ctx.eInfer mvar);
      let waiter : Waiter := Waiter.consumerNode cNode;
      lookupStatus ← get >>= λ ϕ => pure $ ϕ.tableEntries.find anormSubgoal;
      match lookupStatus with
      | none => newSubgoal waiter cNode.ctx anormSubgoal mvar
      | some entry => modify $ λ ϕ => {
+                        -- Note the allocated pair
                         resumeQueue   := entry.answers.foldl (λ rq answer => rq.enqueue (cNode, answer)) ϕ.resumeQueue,
                         tableEntries  := ϕ.tableEntries.insert anormSubgoal { waiters := entry.waiters.push waiter, .. entry },
                         .. ϕ }
@@ -240,6 +249,11 @@ do lookupStatus ← get >>= λ ϕ => pure $ ϕ.env.find instName;
 def generate : TCMethod Unit :=
 do gNode ← get >>= λ ϕ => pure ϕ.generatorStack.peek!;
    match gNode.remainingInstances with
+   -- TODO(dselsam): if we are keeping the tables as a cache, then we must detect
+   -- completed subgoals to free the memory in the forests.
+   -- There is a simple way to do this within a single query, described in S3.5 of the SAG-WAM paper.
+   -- However, it is more subtle to with caching across multiple queries.
+   -- TODO(dselsam): figure out how to do it
    | []          => modify $ λ ϕ => { generatorStack := ϕ.generatorStack.pop, .. ϕ }
    | inst::insts => do
      ⟨instTE, ctx⟩ ← match inst with
@@ -320,6 +334,7 @@ do env ← get >>= λ ϕ => pure ϕ.env;
    newSubgoal Waiter.root ctx anormSubgoal mvar;
    modify $ λ ϕ => { mainMVar := mvar .. ϕ };
    ⟨instVal, instType⟩ ← synthCore ctx₀ goalType fuel;
+   -- TODO(dselsam): it could be more efficient to unify only the eReplacements and uReplacements here.
    match (Context.eUnify goalType₀ instType).run ctx with
    | EStateM.Result.error msg _ => throw $ "outParams do not match: " ++ toString goalType₀ ++ " ≠ " ++ toString instType
    | EStateM.Result.ok _ ctx => do
