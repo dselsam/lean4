@@ -86,30 +86,35 @@ structure TCState : Type :=
 
 abbrev TCMethod : Type → Type := EStateM String TCState
 
+inductive QuickIsClassResult : Type
+| unknown       : QuickIsClassResult
+| definitelyNot : QuickIsClassResult
+| yesIsClass    : Name → QuickIsClassResult
+
 -- TODO(dselsam): once `whnf` is ready, need a more expensive pass as a backup,
 -- that creates locals and calls `whnf` on every recursion.
 -- See: [type_context.cpp] optional<name> type_context_old::is_full_class(expr type)
 -- TODO(dselsam): check if we need to call `get_decl()` as well in the `const` case.
-def quickIsClass (env : Environment) : Expr → Option (Option Name)
-| Expr.letE _ _ _ _ _   => none
-| Expr.proj _ _ _ _     => none
+def quickIsClass (env : Environment) : Expr → QuickIsClassResult
+| Expr.letE _ _ _ _ _   => QuickIsClassResult.unknown
+| Expr.proj _ _ _ _     => QuickIsClassResult.unknown
 | Expr.mdata _ e _      => quickIsClass e
-| Expr.const n _ _      => if isClass env n then some (some  n) else none
+| Expr.const n _ _      => if isClass env n then QuickIsClassResult.yesIsClass n else QuickIsClassResult.unknown
 | Expr.forallE _ _ b _  => quickIsClass b
 | Expr.app e _ _        =>
   let f := e.getAppFn;
-  if f.isConst && isClass env f.constName! then some (some f.constName!)
-  else if f.isLambda then none
-  else some none
-| _            => some none
+  if f.isConst && isClass env f.constName! then QuickIsClassResult.yesIsClass f.constName!
+  else if f.isLambda then QuickIsClassResult.unknown
+  else QuickIsClassResult.definitelyNot
+| _            => QuickIsClassResult.definitelyNot
 
 def newSubgoal (waiter : Waiter) (ctx : Context) (anormSubgoal mvar : Expr) : TCMethod Unit :=
 do let mvarType := ctx.eInstantiate (ctx.eInfer mvar);
    isClassStatus ← get >>= λ ϕ => pure $ quickIsClass ϕ.env mvarType;
    match isClassStatus with
-   | none      => throw $ "quickIsClass not sufficient to show `" ++ toString mvarType ++ "` is a class"
-   | some none => throw $ "found non-class goal `" ++ toString mvarType ++ "`"
-   | some (some n) => do
+   | QuickIsClassResult.unknown       => throw $ "quickIsClass not sufficient to show `" ++ toString mvarType ++ "` is a class"
+   | QuickIsClassResult.definitelyNot => throw $ "found non-class goal `" ++ toString mvarType ++ "`"
+   | QuickIsClassResult.yesIsClass n  => do
      let ⟨newVal, newType, newCtx⟩ := Context.internalize ctx mvar mvarType {};
      gNode ← get >>= λ ϕ => pure {
        GeneratorNode .
