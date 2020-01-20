@@ -69,7 +69,7 @@ structure State :=
 abbrev M := ReaderT MetavarContext (StateM State)
 
 partial def normLevel : Level → M Level
-| u => if !u.hasMVar then pure u else
+| u =>
   match u with
   | Level.succ v _      => do v ← normLevel v; pure $ u.updateSucc! v
   | Level.max v w _     => do v ← normLevel v; w ← normLevel w; pure $ u.updateMax! v w
@@ -88,7 +88,7 @@ partial def normLevel : Level → M Level
   | u                   => pure u
 
 partial def normExpr : Expr → M Expr
-| e => if !e.hasMVar then pure e else
+| e =>
   match e with
   | Expr.const _ us _    => do us ← us.mapM normLevel; pure $ e.updateConst! us
   | Expr.sort u _        => do u ← normLevel u; pure $ e.updateSort! u
