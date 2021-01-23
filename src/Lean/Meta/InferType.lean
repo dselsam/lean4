@@ -123,7 +123,7 @@ def throwTypeExcepted {α} (type : Expr) : MetaM α :=
 
 def getLevel (type : Expr) : MetaM Level := do
   let typeType ← inferType type
-  let typeType ← whnfD typeType
+  let typeType ← withTransparency TransparencyMode.all $ whnf typeType
   match typeType with
   | Expr.sort lvl _    => pure lvl
   | Expr.mvar mvarId _ =>
