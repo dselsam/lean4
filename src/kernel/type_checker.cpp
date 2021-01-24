@@ -1041,7 +1041,7 @@ extern "C" lean_object * lean_kernel_whnf(lean_object * env, lean_object * lctx,
 }
 
 void initialize_type_checker() {
-    g_id_delta     = new name("id_delta");
+    g_id_delta     = new name("idDelta");
     mark_persistent(g_id_delta->raw());
     g_dont_care    = new expr(mk_const("dontcare"));
     mark_persistent(g_dont_care->raw());
