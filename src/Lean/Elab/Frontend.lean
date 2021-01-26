@@ -44,6 +44,17 @@ def setParserState (ps : Parser.ModuleParserState) : FrontendM Unit := modify fu
 def setMessages (msgs : MessageLog) : FrontendM Unit := modify fun s => { s with commandState := { s.commandState with messages := msgs } }
 def getInputContext : FrontendM Parser.InputContext := do pure (← read).inputCtx
 
+def showSourceInfo : SourceInfo → String
+| SourceInfo.original leading pos trailing => "(original {leading} {pos} {trailing})"
+| SourceInfo.synthetic pos endPos          => "(synthetic {pos} {endPos})"
+| SourceInfo.none                          => "(none)"
+
+partial def showSyntax : Syntax → String
+| Syntax.missing               => "(missing)"
+| Syntax.node kind args        => s!"(node {kind} #[{",".intercalate (args.map showSyntax).toList}])"
+| Syntax.atom info val  => s!"(atom {showSourceInfo info} {val})"
+| Syntax.ident info rawval val prs => s!"(ident {showSourceInfo info} {rawval} {val} {prs})"
+
 def processCommand : FrontendM Bool := do
   updateCmdPos
   let cmdState ← getCommandState
@@ -60,6 +71,9 @@ def processCommand : FrontendM Bool := do
     if Parser.isEOI cmd || Parser.isExitCommand cmd then
       pure true -- Done
     else
+      -- START TEMP
+      -- println! "[COMMAND] {showSyntax cmd}"
+      -- END TEMP
       profileitM IO.Error "elaboration" scope.opts pos $ elabCommandAtFrontend cmd
       pure false
 
