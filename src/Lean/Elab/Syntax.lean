@@ -242,8 +242,8 @@ private def declareSyntaxCatQuotParser (catName : Name) : CommandElabM Unit := d
   ```
   It generates the names `term_+_` and `term[_,]`
 -/
-partial def mkNameFromParserSyntax (catName : Name) (stx : Syntax) : CommandElabM Name :=
-  mkUnusedBaseName <| Name.mkSimple <| appendCatName <| visit stx ""
+partial def mkNameFromParserSyntax (catName : Name) (stx : Syntax) : CommandElabM Name := do
+  mkUnusedBaseName <| (λ n => (← getMainModule) ++ n) <| Name.mkSimple <| appendCatName <| visit stx ""
 where
   visit (stx : Syntax) (acc : String) : String :=
     match stx.isStrLit? with
