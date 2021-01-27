@@ -627,7 +627,8 @@ mutual
             return some c
           else
             -- make sure abbreviations are unfolded
-            match (← whnf type).getAppFn with
+            let wtype := (← whnf type).getAppFn
+            match wtype with
             | Expr.const c _ _ => return if isClass env c then some c else none
             | _ => return none
         | _ => return none

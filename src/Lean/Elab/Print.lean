@@ -20,7 +20,7 @@ private def levelParamsToMessageData (levelParams : List Name) : MessageData :=
       m := m ++ ", " ++ u
     return m ++ "}"
 
-private def mkHeader (kind : String) (id : Name) (levelParams : List Name) (type : Expr) (safety : DefinitionSafety) : CommandElabM MessageData := do
+private def mkHeader (kind : String) (id : Name) (levelParams : List Name) (type : Expr) (safety : DefinitionSafety) (hints : ReducibilityHints := ReducibilityHints.regular 0) : CommandElabM MessageData := do
   let m : MessageData :=
     match safety with
     | DefinitionSafety.unsafe  => "unsafe "
@@ -30,14 +30,20 @@ private def mkHeader (kind : String) (id : Name) (levelParams : List Name) (type
   let (m, id) := match privateToUserName? id with
     | some id => (m ++ "private ", id)
     | none    => (m, id)
+  let m := match hints with
+           | ReducibilityHints.abbrev => m ++ "abbrev "
+           | ReducibilityHints.opaque => m ++ "opaque "
+           | ReducibilityHints.regular _ => m
+  let m := if (← isReducible id) then m ++ "reducible " else m
+
   let m := m ++ kind ++ " " ++ id ++ levelParamsToMessageData levelParams ++ " : " ++ type
   pure m
 
 private def mkHeader' (kind : String) (id : Name) (levelParams : List Name) (type : Expr) (isUnsafe : Bool) : CommandElabM MessageData :=
   mkHeader kind id levelParams type (if isUnsafe then DefinitionSafety.unsafe else DefinitionSafety.safe)
 
-private def printDefLike (kind : String) (id : Name) (levelParams : List Name) (type : Expr) (value : Expr) (safety := DefinitionSafety.safe) : CommandElabM Unit := do
-  let m ← mkHeader kind id levelParams type safety
+private def printDefLike (kind : String) (id : Name) (levelParams : List Name) (type : Expr) (value : Expr) (safety := DefinitionSafety.safe) (hints := ReducibilityHints.regular 0) : CommandElabM Unit := do
+  let m ← mkHeader kind id levelParams type safety hints
   let m := m ++ " :=" ++ Format.line ++ value
   logInfo m
 
@@ -59,7 +65,7 @@ private def printInduct (id : Name) (levelParams : List Name) (numParams : Nat) 
 private def printIdCore (id : Name) : CommandElabM Unit := do
   match (← getEnv).find? id with
   | ConstantInfo.axiomInfo { levelParams := us, type := t, isUnsafe := u, .. } => printAxiomLike "axiom" id us t u
-  | ConstantInfo.defnInfo  { levelParams := us, type := t, value := v, safety := s, .. } => printDefLike "def" id us t v s
+  | ConstantInfo.defnInfo  { levelParams := us, type := t, value := v, safety := s, hints := hs, .. } => printDefLike "def" id us t v s hs
   | ConstantInfo.thmInfo  { levelParams := us, type := t, value := v, .. } => printDefLike "theorem" id us t v
   | ConstantInfo.opaqueInfo  { levelParams := us, type := t, isUnsafe := u, .. } => printAxiomLike "constant" id us t u
   | ConstantInfo.quotInfo  { kind := kind, levelParams := us, type := t, .. } => printQuot kind id us t
