@@ -190,7 +190,7 @@ def getInstances (type : Expr) : MetaM (Array Expr) := do
   forallTelescopeReducing type fun _ type => do
     let className? ← isClass? type
     match className? with
-    | none   => throwError $ "type class instance expected" ++ indentExpr type
+    | none   => throwError $ "typeclass goal reached during synthesis is not a class: " ++ indentExpr type
     | some className =>
       let globalInstances ← getGlobalInstancesIndex
       let result ← globalInstances.getUnify type
