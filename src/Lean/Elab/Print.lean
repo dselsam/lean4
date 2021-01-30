@@ -35,7 +35,7 @@ private def mkHeader (kind : String) (id : Name) (levelParams : List Name) (type
            | ReducibilityHints.opaque => m ++ "opaque "
            | ReducibilityHints.regular _ => m
   let m := if (← isReducible id) then m ++ "reducible " else m
-
+  let m := if (← getEnv).isProjectionFn id then m ++ "projection " else m
   let m := m ++ kind ++ " " ++ id ++ levelParamsToMessageData levelParams ++ " : " ++ type
   pure m
 
