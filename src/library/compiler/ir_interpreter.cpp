@@ -58,6 +58,9 @@ functions, which have a (relatively) homogeneous ABI that we can use without run
 
 namespace lean {
 namespace ir {
+
+extern "C" object * lean_ir_mk_num_expr(object * v);
+
 // C++ wrappers of Lean data types
 
 typedef object_ref lit_val;
@@ -298,14 +301,29 @@ void * lookup_symbol_in_cur_exe(char const * sym) {
 }
 
 object * mk_obj_pair(object * obj1, object * obj2) {
-    obj_res new_r = lean_alloc_ctor(0, 2, 0);
+    obj_res new_r = lean_alloc_ctor(LeanMaxCtorTag, 2, 0);
+    std::cout << "[mk_obj_pair] " << obj1 << " " << obj2 << " ==> " << new_r << std::endl;
     lean_ctor_set(new_r, 0, obj1);
     lean_ctor_set(new_r, 1, obj2);
     return new_r;
 }
 
-object * obj_pair_fst(object * objs) { return lean_ctor_get(objs, 0); }
-object * obj_pair_snd(object * objs) { return lean_ctor_get(objs, 1); }
+object * obj_pair_fst(object * objs) {
+    std::cout << "[obj_pair_fst] in:  " << objs << std::endl;
+    object * fst = lean_ctor_get(objs, 0);
+    std::cout << "[obj_pair_fst] out: " << fst << std::endl;
+    return fst;
+}
+
+object * obj_pair_snd(object * objs) {
+    std::cout << "[obj_pair_snd] in:  " << objs << std::endl;
+    object * snd = lean_ctor_get(objs, 1);
+    std::cout << "[obj_pair_snd] out: " << snd << std::endl;
+    return snd;
+}
+
+bool is_oracle_inspect(name const & fn) { return fn == name({"Search", "Oracle", "inspect"}); }
+bool may_oracle_inspect(name const & fn) { return is_prefix_of(name({"Search", "Oracle", "Inspect"}), fn); }
 
 class interpreter;
 LEAN_THREAD_PTR(interpreter, g_interpreter);
@@ -429,7 +447,9 @@ private:
     /** \brief Return closure pointing to interpreter stub taking interpreter data, declaration to be called, and partially
         applied arguments. */
     object * mk_stub_closure(decl const & d, unsigned n, object ** args, object ** exprs) {
+        std::cout << "[mk_stub_closure] " << decl_fun_id(d) << " " << n << std::endl;
         unsigned cls_size = 3 + decl_params(d).size();
+        std::cout << "[mk_stub_closure] " << "allocating closure of size " << cls_size << std::endl;
         object * cls = alloc_closure(get_stub(cls_size), cls_size, 3 + n);
         closure_set(cls, 0, m_env.to_obj_arg());
         closure_set(cls, 1, m_opts.to_obj_arg());
@@ -504,7 +524,7 @@ private:
                     // point closure directly at native symbol
                     object * cls = alloc_closure(sym.m_addr, decl_params(sym.m_decl).size(), expr_pap_args(e).size());
                     for (unsigned i = 0; i < expr_pap_args(e).size(); i++) {
-                        closure_set(cls, i, eval_arg(expr_pap_args(e)[i]).m_obj);
+                        closure_set(cls, i, mk_obj_pair(eval_arg(expr_pap_args(e)[i]).m_obj, expr_arg(expr_pap_args(e)[i]).m_obj));
                     }
                     return cls;
                 } else {
@@ -617,6 +637,8 @@ private:
                     // NOTE: `var` must be called *after* `eval_expr` because the stack may get resized and invalidate
                     // the pointer
                     var(fn_body_vdecl_var(b)) = v;
+                    expr_at(fn_body_vdecl_var(b)) = fn_body_vdecl_expr(b).to_obj_arg();
+
                     DEBUG_CODE(lean_trace(name({"interpreter", "step"}),
                                           tout() << std::string(m_call_stack.size(), ' ') << "=> x_";
                                           tout() << fn_body_vdecl_var(b).get_small_value() << " = ";
@@ -674,18 +696,21 @@ private:
                 }
                 case fn_body_kind::Inc: // increment reference counter
                     inc(var(fn_body_inc_var(b)).m_obj, fn_body_inc_val(b).get_small_value());
+                    inc(expr_at(fn_body_inc_var(b)).m_obj, fn_body_inc_val(b).get_small_value());
                     b = fn_body_inc_cont(b);
                     break;
                 case fn_body_kind::Dec: { // decrement reference counter
                     size_t n = fn_body_dec_val(b).get_small_value();
                     for (size_t i = 0; i < n; i++) {
                         dec(var(fn_body_dec_var(b)).m_obj);
+                        dec(expr_at(fn_body_dec_var(b)).m_obj);
                     }
                     b = fn_body_dec_cont(b);
                     break;
                 }
                 case fn_body_kind::Del: // delete object of unique reference
                     lean_free_object(var(fn_body_del_var(b)).m_obj);
+                    lean_free_object(expr_at(fn_body_del_var(b)).m_obj);
                     b = fn_body_del_cont(b);
                     break;
                 case fn_body_kind::MData: // metadata; no-op
@@ -723,6 +748,7 @@ private:
                     lean_assert(fn_body_jdecl_params(jp).size() == fn_body_jmp_args(b).size());
                     for (size_t i = 0; i < fn_body_jdecl_params(jp).size(); i++) {
                         var(param_var(fn_body_jdecl_params(jp)[i])) = eval_arg(fn_body_jmp_args(b)[i]);
+                        expr_at(param_var(fn_body_jdecl_params(jp)[i])) = expr_arg(fn_body_jmp_args(b)[i]);
                     }
                     b = fn_body_jdecl_body(jp);
                     break;
@@ -767,7 +793,7 @@ private:
             return *e;
         } else {
             symbol_cache_entry e_new { get_decl(fn), nullptr, false };
-            if (m_prefer_native || decl_tag(e_new.m_decl) == decl_kind::Extern || has_init_attribute(m_env, fn)) {
+            if (!may_oracle_inspect(fn) && (m_prefer_native || decl_tag(e_new.m_decl) == decl_kind::Extern || has_init_attribute(m_env, fn))) {
                 string_ref mangled = name_mangle(fn, *g_mangle_prefix);
                 string_ref boxed_mangled(string_append(mangled.to_obj_arg(), g_boxed_mangled_suffix->raw()));
                 // check for boxed version first
@@ -837,7 +863,14 @@ private:
         }
     }
 
+    value call_oracle_inspect(name const & fn, array_ref<arg> const & args) {
+        if (args.size() != 2) throw exception(sstream() << fn << " called on "<< args.size() << " args, expecting 2");
+        return expr_arg(args[0]);
+    }
+
     value call(name const & fn, array_ref<arg> const & args) {
+        if (is_oracle_inspect(fn)) return call_oracle_inspect(fn, args);
+
         size_t old_size = m_arg_stack.size();
         value r;
         symbol_cache_entry e = lookup_symbol(fn);
@@ -884,10 +917,20 @@ private:
     // closure stub
     object * stub_m(object ** args) {
         decl d(args[2]);
+        std::cout << "[oracle] closure stub for: " << decl_fun_id(d) << std::endl;
         size_t old_size = m_arg_stack.size();
         for (size_t i = 0; i < decl_params(d).size(); i++) {
-            m_arg_stack.push_back(obj_pair_fst(args[3 + i]));
-            m_expr_stack.push_back(obj_pair_snd(args[3 + i]));
+            std::cout << "[oracle] checking argument #" << i << " out of " << decl_params(d).size() << ": " << args[3+i] << std::endl;
+            if (lean_ptr_tag(args[3+i]) == LeanMaxCtorTag) {
+                m_arg_stack.push_back(obj_pair_fst(args[3 + i]));
+                m_expr_stack.push_back(obj_pair_snd(args[3 + i]));
+            } else if (args[3+i] != (object *)0x1) {
+                std::cout << "[oracle] closure not arg created by us" << std::endl;
+                m_arg_stack.push_back(args[3+i]);
+                m_expr_stack.push_back(lean_ir_mk_num_expr(0));
+            } else {
+                std::cout << "[oracle] skipping 0x1 arg" << std::endl;
+            }
         }
         push_frame(d, old_size);
         object * r = eval_body(decl_fun_body(d)).m_obj;
