@@ -297,12 +297,27 @@ void * lookup_symbol_in_cur_exe(char const * sym) {
 #endif
 }
 
+object * mk_obj_pair(object * obj1, object * obj2) {
+    obj_res new_r = lean_alloc_ctor(0, 2, 0);
+    lean_ctor_set(new_r, 0, obj1);
+    lean_ctor_set(new_r, 1, obj2);
+    return new_r;
+}
+
+object * obj_pair_fst(object * objs) { return lean_ctor_get(objs, 0); }
+object * obj_pair_snd(object * objs) { return lean_ctor_get(objs, 1); }
+
 class interpreter;
 LEAN_THREAD_PTR(interpreter, g_interpreter);
 
 class interpreter {
     // stack of IR variable slots
     std::vector<value> m_arg_stack;
+
+    // [oracle] stack of IR expr slots
+    // (one for each value in `m_arg_stack`)
+    std::vector<value> m_expr_stack;
+
     // stack of join points
     std::vector<fn_body const *> m_jp_stack;
     struct frame {
@@ -346,8 +361,21 @@ class interpreter {
         // we don't know the frame size (unless we do an additional IR pass), so we extend it dynamically
         if (i >= m_arg_stack.size()) {
             m_arg_stack.resize(i + 1);
+            m_expr_stack.resize(i + 1);
         }
         return m_arg_stack[i];
+    }
+
+    /** \brief Get reference to stack slot of IR expression */
+    inline value & expr_at(var_id const & v) {
+        // variables are 1-indexed
+        size_t i = get_frame().m_arg_bp + v.get_small_value() - 1;
+        // we don't know the frame size (unless we do an additional IR pass), so we extend it dynamically
+        if (i >= m_expr_stack.size()) {
+            m_arg_stack.resize(i + 1);
+            m_expr_stack.resize(i + 1);
+        }
+        return m_expr_stack[i];
     }
 
 public:
@@ -370,6 +398,11 @@ private:
     value eval_arg(arg const & a) {
         // an "irrelevant" argument is type- or proof-erased; we can use an arbitrary value for it
         return arg_is_irrelevant(a) ? box(0) : var(arg_var_id(a));
+    }
+
+    value expr_arg(arg const & a) {
+        // an "irrelevant" argument is type- or proof-erased; we can use an arbitrary value for it
+        return arg_is_irrelevant(a) ? box(0) : expr_at(arg_var_id(a));
     }
 
     /** \brief Allocate constructor object with given tag and arguments */
@@ -395,14 +428,15 @@ private:
 
     /** \brief Return closure pointing to interpreter stub taking interpreter data, declaration to be called, and partially
         applied arguments. */
-    object * mk_stub_closure(decl const & d, unsigned n, object ** args) {
+    object * mk_stub_closure(decl const & d, unsigned n, object ** args, object ** exprs) {
         unsigned cls_size = 3 + decl_params(d).size();
         object * cls = alloc_closure(get_stub(cls_size), cls_size, 3 + n);
         closure_set(cls, 0, m_env.to_obj_arg());
         closure_set(cls, 1, m_opts.to_obj_arg());
         closure_set(cls, 2, d.to_obj_arg());
+
         for (unsigned i = 0; i < n ; i++)
-            closure_set(cls, 3 + i, args[i]);
+            closure_set(cls, 3 + i, mk_obj_pair(args[i], exprs[i]));
         return cls;
     }
 
@@ -475,11 +509,13 @@ private:
                     return cls;
                 } else {
                     // point closure at interpreter stub
-                    object ** args = static_cast<object **>(LEAN_ALLOCA(expr_pap_args(e).size() * sizeof(object *))); // NOLINT
+                    object ** args  = static_cast<object **>(LEAN_ALLOCA(expr_pap_args(e).size() * sizeof(object *))); // NOLINT
+                    object ** exprs = static_cast<object **>(LEAN_ALLOCA(expr_pap_args(e).size() * sizeof(object *))); // NOLINT
                     for (size_t i = 0; i < expr_pap_args(e).size(); i++) {
                         args[i] = eval_arg(expr_pap_args(e)[i]).m_obj;
+                        exprs[i] = expr_arg(expr_pap_args(e)[i]).m_obj;
                     }
-                    return mk_stub_closure(sym.m_decl, expr_pap_args(e).size(), args);
+                    return mk_stub_closure(sym.m_decl, expr_pap_args(e).size(), args, exprs);
                 }
             }
             case expr_kind::Ap: { // (saturated or unsatured) application of closure; mostly handled by runtime
@@ -564,12 +600,15 @@ private:
                         size_t old_size = m_arg_stack.size();
                         for (const auto & arg : args) {
                             m_arg_stack.push_back(eval_arg(arg));
+                            m_expr_stack.push_back(expr_arg(arg));
                         }
                         // now copy to parameter slots
                         for (size_t i = 0; i < args.size(); i++) {
                             m_arg_stack[get_frame().m_arg_bp + i] = m_arg_stack[old_size + i];
+                            m_expr_stack[get_frame().m_arg_bp + i] = m_expr_stack[old_size + i];
                         }
                         m_arg_stack.resize(get_frame().m_arg_bp + args.size());
+                        m_expr_stack.resize(get_frame().m_arg_bp + args.size());
                         b = b0;
                         check_system();
                         break;
@@ -710,6 +749,7 @@ private:
 
     void pop_frame(value DEBUG_CODE(r), type DEBUG_CODE(t)) {
         m_arg_stack.resize(get_frame().m_arg_bp);
+        m_expr_stack.resize(get_frame().m_arg_bp);
         m_jp_stack.resize(get_frame().m_jp_bp);
         m_call_stack.pop_back();
         DEBUG_CODE({
@@ -832,6 +872,7 @@ private:
             // evaluate args in old stack frame
             for (const auto & arg : args) {
                 m_arg_stack.push_back(eval_arg(arg));
+                m_expr_stack.push_back(expr_arg(arg));
             }
             push_frame(e.m_decl, old_size);
             r = eval_body(decl_fun_body(e.m_decl));
@@ -845,7 +886,8 @@ private:
         decl d(args[2]);
         size_t old_size = m_arg_stack.size();
         for (size_t i = 0; i < decl_params(d).size(); i++) {
-            m_arg_stack.push_back(args[3 + i]);
+            m_arg_stack.push_back(obj_pair_fst(args[3 + i]));
+            m_expr_stack.push_back(obj_pair_snd(args[3 + i]));
         }
         push_frame(d, old_size);
         object * r = eval_body(decl_fun_body(d)).m_obj;
@@ -937,7 +979,7 @@ public:
                 if (option_ref<decl> d_boxed = find_ir_decl(m_env, fn + *g_boxed_suffix)) {
                     d = *d_boxed.get();
                 }
-                r = mk_stub_closure(d, 0, nullptr);
+                r = mk_stub_closure(d, 0, nullptr, nullptr);
             }
         }
         if (n > 0) {
