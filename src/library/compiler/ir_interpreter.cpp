@@ -52,7 +52,10 @@ functions, which have a (relatively) homogeneous ABI that we can use without run
 // We already set `-Dinterpreter.prefer_native=false` in stdlib.make, but also set it here as a default when we use stage 0 in the editor
 #define LEAN_DEFAULT_INTERPRETER_PREFER_NATIVE false
 #else
+
+// TODO(dselsam): just seeing if this helps
 #define LEAN_DEFAULT_INTERPRETER_PREFER_NATIVE true
+// #define LEAN_DEFAULT_INTERPRETER_PREFER_NATIVE false
 #endif
 #endif
 
@@ -301,6 +304,8 @@ void * lookup_symbol_in_cur_exe(char const * sym) {
 }
 
 object * mk_obj_pair(object * obj1, object * obj2) {
+    inc(obj1);
+    inc(obj2);
     obj_res new_r = lean_alloc_ctor(LeanMaxCtorTag, 2, 0);
     std::cout << "[mk_obj_pair] " << obj1 << " " << obj2 << " ==> " << new_r << std::endl;
     lean_ctor_set(new_r, 0, obj1);
@@ -322,7 +327,7 @@ object * obj_pair_snd(object * objs) {
     return snd;
 }
 
-bool is_oracle_inspect(name const & fn) { return fn == name({"Search", "Oracle", "inspect"}); }
+bool is_oracle_inspect(name const & fn) { return fn == name({"Search", "Oracle", "inspect", "_rarg"}); }
 bool may_oracle_inspect(name const & fn) { return is_prefix_of(name({"Search", "Oracle", "Inspect"}), fn); }
 
 class interpreter;
@@ -420,7 +425,7 @@ private:
 
     value expr_arg(arg const & a) {
         // an "irrelevant" argument is type- or proof-erased; we can use an arbitrary value for it
-        return arg_is_irrelevant(a) ? box(0) : expr_at(arg_var_id(a));
+        return arg_is_irrelevant(a) ? lean_ir_mk_num_expr(0) : expr_at(arg_var_id(a));
     }
 
     /** \brief Allocate constructor object with given tag and arguments */
@@ -494,6 +499,7 @@ private:
                 }
             }
             case expr_kind::Proj: // object field access
+                std::cout << "[proj] " << var(expr_proj_obj(e)).m_obj << std::endl;
                 return cnstr_get(var(expr_proj_obj(e)).m_obj, expr_proj_idx(e).get_small_value());
             case expr_kind::UProj: // USize field access
                 return cnstr_get_usize(var(expr_uproj_obj(e)).m_obj, expr_uproj_idx(e).get_small_value());
@@ -539,11 +545,17 @@ private:
                 }
             }
             case expr_kind::Ap: { // (saturated or unsatured) application of closure; mostly handled by runtime
-                object ** args = static_cast<object **>(LEAN_ALLOCA(expr_ap_args(e).size() * sizeof(object *))); // NOLINT
+                object ** args  = static_cast<object **>(LEAN_ALLOCA(expr_ap_args(e).size() * sizeof(object *))); // NOLINT
+                object ** exprs = static_cast<object **>(LEAN_ALLOCA(expr_ap_args(e).size() * sizeof(object *))); // NOLINT
+                object ** pairs = static_cast<object **>(LEAN_ALLOCA(expr_ap_args(e).size() * sizeof(object *))); // NOLINT
                 for (size_t i = 0; i < expr_ap_args(e).size(); i++) {
-                    args[i] = eval_arg(expr_ap_args(e)[i]).m_obj;
+                    args[i]  = eval_arg(expr_ap_args(e)[i]).m_obj;
+                    exprs[i] = expr_arg(expr_ap_args(e)[i]).m_obj;
+                    pairs[i] = mk_obj_pair(args[i], exprs[i]);
                 }
-                object * r = apply_n(var(expr_ap_fun(e)).m_obj, expr_ap_args(e).size(), args);
+
+                std::cout << "[ap] bundling now" << std::endl;
+                object * r = apply_n(var(expr_ap_fun(e)).m_obj, expr_ap_args(e).size(), pairs);
                 return r;
             }
             case expr_kind::Box: // box unboxed value
@@ -703,7 +715,7 @@ private:
                     size_t n = fn_body_dec_val(b).get_small_value();
                     for (size_t i = 0; i < n; i++) {
                         dec(var(fn_body_dec_var(b)).m_obj);
-                        dec(expr_at(fn_body_dec_var(b)).m_obj);
+                        // dec(expr_at(fn_body_dec_var(b)).m_obj);
                     }
                     b = fn_body_dec_cont(b);
                     break;
@@ -864,31 +876,44 @@ private:
     }
 
     value call_oracle_inspect(name const & fn, array_ref<arg> const & args) {
-        if (args.size() != 2) throw exception(sstream() << fn << " called on "<< args.size() << " args, expecting 2");
-        return expr_arg(args[0]);
+        std::cout << "[call_oracle_inspect] " << fn << " " << args.size() << std::endl;
+        // if (args.size() != 2) throw exception(sstream() << fn << " called on "<< args.size() << " args, expecting 2");
+        object * obj = expr_arg(args[0]).m_obj;
+        inc(obj);
+        object * res = io_result_mk_ok(obj);
+        std::cout << "[call_oracle_inspect] " << "returning " << obj << " ==> " << res << std::endl;
+        return res;
     }
 
     value call(name const & fn, array_ref<arg> const & args) {
+        std::cout << "[call] " << fn << " " << args.size() << std::endl;
         if (is_oracle_inspect(fn)) return call_oracle_inspect(fn, args);
 
         size_t old_size = m_arg_stack.size();
         value r;
         symbol_cache_entry e = lookup_symbol(fn);
         if (e.m_addr) {
-            object ** args2 = static_cast<object **>(LEAN_ALLOCA(args.size() * sizeof(object *))); // NOLINT
+            object ** args2  = static_cast<object **>(LEAN_ALLOCA(args.size() * sizeof(object *))); // NOLINT
+            object ** exprs2 = static_cast<object **>(LEAN_ALLOCA(args.size() * sizeof(object *))); // NOLINT
+            object ** pairs2 = static_cast<object **>(LEAN_ALLOCA(args.size() * sizeof(object *))); // NOLINT
             for (size_t i = 0; i < args.size(); i++) {
                 type t = param_type(decl_params(e.m_decl)[i]);
-                args2[i] = box_t(eval_arg(args[i]), t);
+                args2[i]  = box_t(eval_arg(args[i]), t);
+                exprs2[i] = expr_arg(args[i]).m_obj;
+                pairs2[i] = (i > 0) ? mk_obj_pair(args2[i], exprs2[i]) : args2[i];
+
                 if (e.m_boxed && param_borrow(decl_params(e.m_decl)[i])) {
                     // NOTE: If we chose the boxed version where the IR chose the unboxed one, we need to manually increment
                     // originally borrowed parameters because the wrapper will decrement these after the call.
                     // Basically the wrapper is more homogeneous (removing both unboxed and borrowed parameters) than we
                     // would need in this instance.
                     inc(args2[i]);
+                    inc(exprs2[i]);
+                    inc(pairs2[i]); // TODO(dselsam): totally wrong
                 }
             }
             push_frame(e.m_decl, old_size);
-            object * o = curry(e.m_addr, args.size(), args2);
+            object * o = curry(e.m_addr, args.size(), pairs2);
             type t = decl_type(e.m_decl);
             if (type_is_scalar(t)) {
                 lean_assert(e.m_boxed);
@@ -921,15 +946,13 @@ private:
         size_t old_size = m_arg_stack.size();
         for (size_t i = 0; i < decl_params(d).size(); i++) {
             std::cout << "[oracle] checking argument #" << i << " out of " << decl_params(d).size() << ": " << args[3+i] << std::endl;
-            if (lean_ptr_tag(args[3+i]) == LeanMaxCtorTag) {
+            if ((unsigned long) args[3+i] > 0x700000000000 && lean_ptr_tag(args[3+i]) == LeanMaxCtorTag) {
                 m_arg_stack.push_back(obj_pair_fst(args[3 + i]));
                 m_expr_stack.push_back(obj_pair_snd(args[3 + i]));
-            } else if (args[3+i] != (object *)0x1) {
+            } else {
                 std::cout << "[oracle] closure not arg created by us" << std::endl;
                 m_arg_stack.push_back(args[3+i]);
                 m_expr_stack.push_back(lean_ir_mk_num_expr(0));
-            } else {
-                std::cout << "[oracle] skipping 0x1 arg" << std::endl;
             }
         }
         push_frame(d, old_size);
