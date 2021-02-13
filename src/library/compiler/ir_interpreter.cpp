@@ -55,7 +55,7 @@ functions, which have a (relatively) homogeneous ABI that we can use without run
 
 // TODO(dselsam): just seeing if this helps
 #define LEAN_DEFAULT_INTERPRETER_PREFER_NATIVE true
-// #define LEAN_DEFAULT_INTERPRETER_PREFER_NATIVE false
+//#define LEAN_DEFAULT_INTERPRETER_PREFER_NATIVE false
 #endif
 #endif
 
@@ -64,8 +64,11 @@ namespace ir {
 
 extern "C" object * lean_ir_mk_num_expr(object * v);
 
-// C++ wrappers of Lean data types
+object * lean_unsigned_to_expr(unsigned n) {
+    return lean_ir_mk_num_expr(lean_unsigned_to_nat(n));
+}
 
+// C++ wrappers of Lean data types
 typedef object_ref lit_val;
 typedef object_ref ctor_info;
 
@@ -327,7 +330,7 @@ object * obj_pair_snd(object * objs) {
     return snd;
 }
 
-bool is_oracle_inspect(name const & fn) { return fn == name({"Search", "Oracle", "inspect", "_rarg"}); }
+bool is_oracle_inspect(name const & fn) { return fn == name({"Search", "Oracle", "inspect"}); }
 bool may_oracle_inspect(name const & fn) { return is_prefix_of(name({"Search", "Oracle", "Inspect"}), fn); }
 
 class interpreter;
@@ -378,7 +381,19 @@ class interpreter {
     }
 
     /** \brief Get reference to stack slot of IR variable */
-    inline value & var(var_id const & v) {
+    inline value const & var(var_id const & v) {
+        // variables are 1-indexed
+        size_t i = get_frame().m_arg_bp + v.get_small_value() - 1;
+        // we don't know the frame size (unless we do an additional IR pass), so we extend it dynamically
+        if (i >= m_arg_stack.size()) {
+            m_arg_stack.resize(i + 1);
+            m_expr_stack.resize(i + 1);
+        }
+        return m_arg_stack[i];
+    }
+
+    /** \brief Get reference to stack slot of IR variable */
+    inline value & var_mut(var_id const & v) {
         // variables are 1-indexed
         size_t i = get_frame().m_arg_bp + v.get_small_value() - 1;
         // we don't know the frame size (unless we do an additional IR pass), so we extend it dynamically
@@ -390,7 +405,18 @@ class interpreter {
     }
 
     /** \brief Get reference to stack slot of IR expression */
-    inline value & expr_at(var_id const & v) {
+    inline value const & expr_at(var_id const & v) {
+        // variables are 1-indexed
+        size_t i = get_frame().m_arg_bp + v.get_small_value() - 1;
+        // we don't know the frame size (unless we do an additional IR pass), so we extend it dynamically
+        if (i >= m_expr_stack.size()) {
+            m_arg_stack.resize(i + 1);
+            m_expr_stack.resize(i + 1);
+        }
+        return m_expr_stack[i];
+    }
+
+    inline value & expr_at_mut(var_id const & v) {
         // variables are 1-indexed
         size_t i = get_frame().m_arg_bp + v.get_small_value() - 1;
         // we don't know the frame size (unless we do an additional IR pass), so we extend it dynamically
@@ -425,7 +451,7 @@ private:
 
     value expr_arg(arg const & a) {
         // an "irrelevant" argument is type- or proof-erased; we can use an arbitrary value for it
-        return arg_is_irrelevant(a) ? lean_ir_mk_num_expr(0) : expr_at(arg_var_id(a));
+        return arg_is_irrelevant(a) ? lean_unsigned_to_expr(1000) : expr_at(arg_var_id(a));
     }
 
     /** \brief Allocate constructor object with given tag and arguments */
@@ -648,8 +674,8 @@ private:
                     value v = eval_expr(fn_body_vdecl_expr(b), fn_body_vdecl_type(b));
                     // NOTE: `var` must be called *after* `eval_expr` because the stack may get resized and invalidate
                     // the pointer
-                    var(fn_body_vdecl_var(b)) = v;
-                    expr_at(fn_body_vdecl_var(b)) = fn_body_vdecl_expr(b).to_obj_arg();
+                    var_mut(fn_body_vdecl_var(b)) = v;
+                    expr_at_mut(fn_body_vdecl_var(b)) = fn_body_vdecl_expr(b).to_obj_arg();
 
                     DEBUG_CODE(lean_trace(name({"interpreter", "step"}),
                                           tout() << std::string(m_call_stack.size(), ' ') << "=> x_";
@@ -722,7 +748,8 @@ private:
                 }
                 case fn_body_kind::Del: // delete object of unique reference
                     lean_free_object(var(fn_body_del_var(b)).m_obj);
-                    lean_free_object(expr_at(fn_body_del_var(b)).m_obj);
+                    // TODO(dselsam): memory management
+                    // lean_free_object(expr_at(fn_body_del_var(b)).m_obj);
                     b = fn_body_del_cont(b);
                     break;
                 case fn_body_kind::MData: // metadata; no-op
@@ -759,8 +786,8 @@ private:
                     fn_body const & jp = *m_jp_stack[get_frame().m_jp_bp + fn_body_jmp_jp(b).get_small_value()];
                     lean_assert(fn_body_jdecl_params(jp).size() == fn_body_jmp_args(b).size());
                     for (size_t i = 0; i < fn_body_jdecl_params(jp).size(); i++) {
-                        var(param_var(fn_body_jdecl_params(jp)[i])) = eval_arg(fn_body_jmp_args(b)[i]);
-                        expr_at(param_var(fn_body_jdecl_params(jp)[i])) = expr_arg(fn_body_jmp_args(b)[i]);
+                        var_mut(param_var(fn_body_jdecl_params(jp)[i])) = eval_arg(fn_body_jmp_args(b)[i]);
+                        expr_at_mut(param_var(fn_body_jdecl_params(jp)[i])) = expr_arg(fn_body_jmp_args(b)[i]);
                     }
                     b = fn_body_jdecl_body(jp);
                     break;
@@ -877,11 +904,24 @@ private:
 
     value call_oracle_inspect(name const & fn, array_ref<arg> const & args) {
         std::cout << "[call_oracle_inspect] " << fn << " " << args.size() << std::endl;
-        // if (args.size() != 2) throw exception(sstream() << fn << " called on "<< args.size() << " args, expecting 2");
-        object * obj = expr_arg(args[0]).m_obj;
-        inc(obj);
-        object * res = io_result_mk_ok(obj);
-        std::cout << "[call_oracle_inspect] " << "returning " << obj << " ==> " << res << std::endl;
+        // The arguments will always be `(unsafeCast _ _ <var>) <io-world>`
+        if (args.size() != 2) throw exception(sstream() << fn << " called on "<< args.size() << " args, expecting 2");
+
+
+        // array_ref<arg> const & expr_fap_args(expr const & e) { lean_assert(expr_tag(e) == expr_kind::FAp); return cnstr_get_ref_t<array_ref<arg>>(e, 1); }
+        // array_ref<arg> const & expr_fap_args(expr const & e) { lean_assert(expr_tag(e) == expr_kind::FAp); return cnstr_get_ref_t<array_ref<arg>>(e, 1); }
+
+        // object * obj = expr_arg(expr_fap_args(args[0])[2]).m_obj;
+        object * unsafe_cast_app_expr = expr_arg(args[0]).m_obj;
+
+        lean_assert(static_cast<expr_kind>(cnstr_tag(unsafe_cast_app_expr)) == expr_kind::FAp);
+        // array_ref<arg> const & expr_fap_args(expr const & e) { lean_assert(expr_tag(e) == expr_kind::FAp); return cnstr_get_ref_t<array_ref<arg>>(e, 1); }
+
+        object * thing = expr_arg(expr_fap_args(object_ref(unsafe_cast_app_expr))[2]).m_obj;
+
+        inc(thing);
+        object * res = io_result_mk_ok(thing);
+        std::cout << "[call_oracle_inspect] " << "returning " << res << " ==> " << res << std::endl;
         return res;
     }
 
@@ -913,7 +953,7 @@ private:
                 }
             }
             push_frame(e.m_decl, old_size);
-            object * o = curry(e.m_addr, args.size(), pairs2);
+            object * o = curry(e.m_addr, args.size(), args2);
             type t = decl_type(e.m_decl);
             if (type_is_scalar(t)) {
                 lean_assert(e.m_boxed);
@@ -952,7 +992,7 @@ private:
             } else {
                 std::cout << "[oracle] closure not arg created by us" << std::endl;
                 m_arg_stack.push_back(args[3+i]);
-                m_expr_stack.push_back(lean_ir_mk_num_expr(0));
+                m_expr_stack.push_back(lean_unsigned_to_expr(2000));
             }
         }
         push_frame(d, old_size);
