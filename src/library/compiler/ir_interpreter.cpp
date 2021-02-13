@@ -907,20 +907,17 @@ private:
         // The arguments will always be `(unsafeCast _ _ <var>) <io-world>`
         if (args.size() != 2) throw exception(sstream() << fn << " called on "<< args.size() << " args, expecting 2");
 
-
-        // array_ref<arg> const & expr_fap_args(expr const & e) { lean_assert(expr_tag(e) == expr_kind::FAp); return cnstr_get_ref_t<array_ref<arg>>(e, 1); }
-        // array_ref<arg> const & expr_fap_args(expr const & e) { lean_assert(expr_tag(e) == expr_kind::FAp); return cnstr_get_ref_t<array_ref<arg>>(e, 1); }
-
-        // object * obj = expr_arg(expr_fap_args(args[0])[2]).m_obj;
         object * unsafe_cast_app_expr = expr_arg(args[0]).m_obj;
 
         lean_assert(static_cast<expr_kind>(cnstr_tag(unsafe_cast_app_expr)) == expr_kind::FAp);
-        // array_ref<arg> const & expr_fap_args(expr const & e) { lean_assert(expr_tag(e) == expr_kind::FAp); return cnstr_get_ref_t<array_ref<arg>>(e, 1); }
-
         object * thing = expr_arg(expr_fap_args(object_ref(unsafe_cast_app_expr))[2]).m_obj;
 
+        object * thing_and_env = lean_alloc_ctor(0, 2, 0);
+        lean_ctor_set(thing_and_env, 0, thing);
+        lean_ctor_set(thing_and_env, 1, m_env.to_obj_arg());
+
         inc(thing);
-        object * res = io_result_mk_ok(thing);
+        object * res = io_result_mk_ok(thing_and_env);
         std::cout << "[call_oracle_inspect] " << "returning " << res << " ==> " << res << std::endl;
         return res;
     }
