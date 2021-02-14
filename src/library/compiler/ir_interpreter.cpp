@@ -801,10 +801,11 @@ private:
     }
 
     object * inspect(object * obj) {
-        lean_trace(name({"interpreter", "inspect"}), tout() << "[inspect] " << obj << "\n";);
-        if ((unsigned long) obj < 0x700000000000) {
+        DEBUG_CODE({ lean_trace(name({"interpreter", "inspect"}), tout() << "[inspect] " << obj << "\n";); });
+        if (is_scalar(obj)) {
+            // scalar
             object * result = lean_alloc_ctor(3, 1, 0);
-            // Object.error
+            // TODO: parse scalar info?
             lean_ctor_set(result, 0, usize_to_nat((usize) obj));
             return result;
         } else if (is_cnstr(obj)) {
