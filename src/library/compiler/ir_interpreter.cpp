@@ -58,6 +58,9 @@ functions, which have a (relatively) homogeneous ABI that we can use without run
 
 namespace lean {
 namespace ir {
+
+bool is_inspect(name const & fn) { return fn == name({"Lean", "Inspect", "inspect"}); }
+
 // C++ wrappers of Lean data types
 
 typedef object_ref lit_val;
@@ -797,7 +800,57 @@ private:
         }
     }
 
+    object * inspect(object * obj) {
+        lean_trace(name({"interpreter", "inspect"}), tout() << "[inspect] " << obj << "\n";);
+        if ((unsigned long) obj < 0x700000000000) {
+            object * result = lean_alloc_ctor(3, 1, 0);
+            // Object.error
+            lean_ctor_set(result, 0, usize_to_nat((usize) obj));
+            return result;
+        } else if (is_cnstr(obj)) {
+            unsigned tag = cnstr_tag(obj);
+            unsigned n = cnstr_num_objs(obj);
+            object * args = array_mk_empty();
+            for (unsigned i = 0; i < n; ++i) {
+                args = array_push(args, inspect(cnstr_get(obj, i)));
+            }
+            object * result = lean_alloc_ctor(1, 2, 0);
+            lean_ctor_set(result, 0, mk_nat_obj(tag));
+            lean_ctor_set(result, 1, args);
+            return result;
+        } else if (is_closure(obj)) {
+            void * fun = closure_fun(obj);
+            unsigned arity = closure_arity(obj);
+            unsigned num_fixed = closure_num_fixed(obj);
+            object * fixed = array_mk_empty();
+            for (unsigned i = 0; i < num_fixed; ++i) {
+                fixed = array_push(fixed, inspect(closure_get(obj, i)));
+            }
+            object * result = lean_alloc_ctor(2, 3, 0);
+            lean_ctor_set(result, 0, mk_option_none()); // TODO: map
+            lean_ctor_set(result, 1, mk_nat_obj(arity)); // TODO: map
+            lean_ctor_set(result, 2, fixed);
+            return result;
+        } else {
+            // Object.unsupported
+            return lean_alloc_ctor(0, 0, 0);
+        }
+    }
+
+    value call_inspect(name const & fn, array_ref<arg> const & args) {
+        object * obj = eval_arg(args[0]).m_obj;
+        object * inspect_obj = inspect(obj);
+
+        object * result = lean_alloc_ctor(0, 2, 0);
+        lean_ctor_set(result, 0, inspect_obj);
+        lean_ctor_set(result, 1, m_env.to_obj_arg());
+
+        return io_result_mk_ok(result);
+    }
+
     value call(name const & fn, array_ref<arg> const & args) {
+        if (is_inspect(fn)) return call_inspect(fn, args);
+
         size_t old_size = m_arg_stack.size();
         value r;
         symbol_cache_entry e = lookup_symbol(fn);
@@ -1049,6 +1102,7 @@ void initialize_ir_interpreter() {
         register_trace_class({"interpreter"});
         register_trace_class({"interpreter", "call"});
         register_trace_class({"interpreter", "step"});
+        register_trace_class({"interpreter", "inspect"});
     });
 }
 
