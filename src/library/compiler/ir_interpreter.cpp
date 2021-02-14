@@ -310,23 +310,18 @@ object * mk_obj_pair(object * obj1, object * obj2) {
     inc(obj1);
     inc(obj2);
     obj_res new_r = lean_alloc_ctor(LeanMaxCtorTag, 2, 0);
-    std::cout << "[mk_obj_pair] " << obj1 << " " << obj2 << " ==> " << new_r << std::endl;
     lean_ctor_set(new_r, 0, obj1);
     lean_ctor_set(new_r, 1, obj2);
     return new_r;
 }
 
 object * obj_pair_fst(object * objs) {
-    std::cout << "[obj_pair_fst] in:  " << objs << std::endl;
     object * fst = lean_ctor_get(objs, 0);
-    std::cout << "[obj_pair_fst] out: " << fst << std::endl;
     return fst;
 }
 
 object * obj_pair_snd(object * objs) {
-    std::cout << "[obj_pair_snd] in:  " << objs << std::endl;
     object * snd = lean_ctor_get(objs, 1);
-    std::cout << "[obj_pair_snd] out: " << snd << std::endl;
     return snd;
 }
 
@@ -478,9 +473,7 @@ private:
     /** \brief Return closure pointing to interpreter stub taking interpreter data, declaration to be called, and partially
         applied arguments. */
     object * mk_stub_closure(decl const & d, unsigned n, object ** args, object ** exprs) {
-        std::cout << "[mk_stub_closure] " << decl_fun_id(d) << " " << n << std::endl;
         unsigned cls_size = 3 + decl_params(d).size();
-        std::cout << "[mk_stub_closure] " << "allocating closure of size " << cls_size << std::endl;
         object * cls = alloc_closure(get_stub(cls_size), cls_size, 3 + n);
         closure_set(cls, 0, m_env.to_obj_arg());
         closure_set(cls, 1, m_opts.to_obj_arg());
@@ -525,7 +518,6 @@ private:
                 }
             }
             case expr_kind::Proj: // object field access
-                std::cout << "[proj] " << var(expr_proj_obj(e)).m_obj << std::endl;
                 return cnstr_get(var(expr_proj_obj(e)).m_obj, expr_proj_idx(e).get_small_value());
             case expr_kind::UProj: // USize field access
                 return cnstr_get_usize(var(expr_uproj_obj(e)).m_obj, expr_uproj_idx(e).get_small_value());
@@ -580,7 +572,8 @@ private:
                     pairs[i] = mk_obj_pair(args[i], exprs[i]);
                 }
 
-                std::cout << "[ap] bundling now" << std::endl;
+                // TODO(dselsam): expr_ap_fun(e) isn't always a closure...
+                //
                 object * r = apply_n(var(expr_ap_fun(e)).m_obj, expr_ap_args(e).size(), pairs);
                 return r;
             }
@@ -740,7 +733,7 @@ private:
                 case fn_body_kind::Dec: { // decrement reference counter
                     size_t n = fn_body_dec_val(b).get_small_value();
                     for (size_t i = 0; i < n; i++) {
-                        dec(var(fn_body_dec_var(b)).m_obj);
+                        // dec(var(fn_body_dec_var(b)).m_obj);
                         // dec(expr_at(fn_body_dec_var(b)).m_obj);
                     }
                     b = fn_body_dec_cont(b);
@@ -903,7 +896,8 @@ private:
     }
 
     value call_oracle_inspect(name const & fn, array_ref<arg> const & args) {
-        std::cout << "[call_oracle_inspect] " << fn << " " << args.size() << std::endl;
+        lean_trace(name({"interpreter", "inspect"}), tout() << fn << " " << args.size() << "\n";);
+
         // The arguments will always be `(unsafeCast _ _ <var>) <io-world>`
         if (args.size() != 2) throw exception(sstream() << fn << " called on "<< args.size() << " args, expecting 2");
 
@@ -912,18 +906,17 @@ private:
         lean_assert(static_cast<expr_kind>(cnstr_tag(unsafe_cast_app_expr)) == expr_kind::FAp);
         object * thing = expr_arg(expr_fap_args(object_ref(unsafe_cast_app_expr))[2]).m_obj;
 
-        object * thing_and_env = lean_alloc_ctor(0, 2, 0);
-        lean_ctor_set(thing_and_env, 0, thing);
-        lean_ctor_set(thing_and_env, 1, m_env.to_obj_arg());
+        // We return an InspectResult
+        object * result = lean_alloc_ctor(0, 2, 0);
+        lean_ctor_set(result, 0, thing);
+        lean_ctor_set(result, 1, m_env.to_obj_arg());
 
         inc(thing);
-        object * res = io_result_mk_ok(thing_and_env);
-        std::cout << "[call_oracle_inspect] " << "returning " << res << " ==> " << res << std::endl;
+        object * res = io_result_mk_ok(result);
         return res;
     }
 
     value call(name const & fn, array_ref<arg> const & args) {
-        std::cout << "[call] " << fn << " " << args.size() << std::endl;
         if (is_oracle_inspect(fn)) return call_oracle_inspect(fn, args);
 
         size_t old_size = m_arg_stack.size();
@@ -956,7 +949,7 @@ private:
                 lean_assert(e.m_boxed);
                 // NOTE: this unboxing does not exist in the IR, so we should manually consume `o`
                 r = unbox_t(o, t);
-                lean_dec(o);
+                // lean_dec(o);
             } else {
                 r = o;
             }
@@ -979,15 +972,13 @@ private:
     // closure stub
     object * stub_m(object ** args) {
         decl d(args[2]);
-        std::cout << "[oracle] closure stub for: " << decl_fun_id(d) << std::endl;
         size_t old_size = m_arg_stack.size();
         for (size_t i = 0; i < decl_params(d).size(); i++) {
-            std::cout << "[oracle] checking argument #" << i << " out of " << decl_params(d).size() << ": " << args[3+i] << std::endl;
+            // TODO(dselsam): where are these very low addresses coming from?
             if ((unsigned long) args[3+i] > 0x700000000000 && lean_ptr_tag(args[3+i]) == LeanMaxCtorTag) {
                 m_arg_stack.push_back(obj_pair_fst(args[3 + i]));
                 m_expr_stack.push_back(obj_pair_snd(args[3 + i]));
             } else {
-                std::cout << "[oracle] closure not arg created by us" << std::endl;
                 m_arg_stack.push_back(args[3+i]);
                 m_expr_stack.push_back(lean_unsigned_to_expr(2000));
             }
@@ -1194,6 +1185,7 @@ void initialize_ir_interpreter() {
         register_trace_class({"interpreter"});
         register_trace_class({"interpreter", "call"});
         register_trace_class({"interpreter", "step"});
+        register_trace_class({"interpreter", "inspect"});
     });
 }
 
