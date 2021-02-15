@@ -68,6 +68,7 @@ extern "C" lean_object* lean_mk_io_error_time_expired(uint32_t, lean_object*);
 extern "C" lean_object* lean_mk_io_error_unsatisfied_constraints(uint32_t, lean_object*);
 extern "C" lean_object* lean_mk_io_error_unsupported_operation(uint32_t, lean_object*);
 
+static object * anonymous() { return alloc_cnstr(0, 0, 0); }
 
 extern "C" void lean_io_result_show_error(b_obj_arg r) {
     object * err = io_result_get_error(r);
@@ -112,7 +113,9 @@ static void io_handle_foreach(void * /* mod */, b_obj_arg /* fn */) {
 }
 
 lean_object * io_wrap_handle(FILE *hfile) {
-    return lean_alloc_external(g_io_handle_external_class, hfile);
+    return lean_alloc_external(g_io_handle_external_class,
+                               anonymous(), /* TODO(dselsam): descriptive name */
+                               hfile);
 }
 
 extern "C" obj_res lean_stream_of_handle(obj_arg h);
@@ -657,7 +660,7 @@ static obj_res lean_io_as_task_fn(obj_arg act, obj_arg) {
 
 /* asTask {α : Type} (act : IO α) (prio : Nat) : IO (Task (Except IO.Error α)) */
 extern "C" obj_res lean_io_as_task(obj_arg act, obj_arg prio, obj_arg) {
-    object * c = lean_alloc_closure((void*)lean_io_as_task_fn, 2, 1);
+    object * c = lean_alloc_closure(anonymous() /* TODO(dselsam): descriptive name */, (void*)lean_io_as_task_fn, 2, 1);
     lean_closure_set(c, 0, act);
     object * t = lean_task_spawn_core(c, lean_unbox(prio), /* keep_alive */ true);
     return io_result_mk_ok(t);
@@ -674,7 +677,7 @@ static obj_res lean_io_map_task_fn(obj_arg f, obj_arg a) {
 
 /*  mapTask {α β : Type} (f : α → IO β) (t : Task α) (prio : Nat) : IO (Task (Except IO.Error β)) */
 extern "C" obj_res lean_io_map_task(obj_arg f, obj_arg t, obj_arg prio, obj_arg) {
-    object * c = lean_alloc_closure((void*)lean_io_map_task_fn, 2, 1);
+    object * c = lean_alloc_closure(anonymous() /* TODO(dselsam): descriptive name */, (void*)lean_io_map_task_fn, 2, 1);
     lean_closure_set(c, 0, f);
     object * t2 = lean_task_map_core(c, t, lean_unbox(prio), /* keep_alive */ true);
     return io_result_mk_ok(t2);
@@ -689,9 +692,10 @@ static obj_res lean_io_bind_task_fn(obj_arg f, obj_arg a) {
     }
 }
 
+
 /*  bindTask {α β : Type} (t : Task α) (f : α → IO (Task (Except IO.Error β))) (prio : Nat) : IO (Task (Except IO.Error β)) */
 extern "C" obj_res lean_io_bind_task(obj_arg t, obj_arg f, obj_arg prio, obj_arg) {
-    object * c = lean_alloc_closure((void*)lean_io_bind_task_fn, 2, 1);
+    object * c = lean_alloc_closure(anonymous() /* TODO(dselsam): descriptive name */, (void*)lean_io_bind_task_fn, 2, 1);
     lean_closure_set(c, 0, f);
     object * t2 = lean_task_bind_core(t, c, lean_unbox(prio), /* keep_alive */ true);
     return io_result_mk_ok(t2);

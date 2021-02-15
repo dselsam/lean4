@@ -337,9 +337,6 @@ class interpreter {
     // caches symbol lookup successes _and_ failures
     name_map<symbol_cache_entry> m_symbol_cache;
 
-    // experimental map from `void *` addresses to function names
-    std::unordered_map<usize, name> m_closure_names;
-
     /** \brief Get current stack frame */
     inline frame & get_frame() {
         return m_call_stack.back();
@@ -403,7 +400,7 @@ private:
         applied arguments. */
     object * mk_stub_closure(decl const & d, unsigned n, object ** args) {
         unsigned cls_size = 3 + decl_params(d).size();
-        object * cls = alloc_closure(get_stub(cls_size), cls_size, 3 + n);
+        object * cls = alloc_closure(decl_fun_id(d), get_stub(cls_size), cls_size, 3 + n);
         closure_set(cls, 0, m_env.to_obj_arg());
         closure_set(cls, 1, m_opts.to_obj_arg());
         closure_set(cls, 2, d.to_obj_arg());
@@ -476,7 +473,7 @@ private:
                 symbol_cache_entry sym = lookup_symbol(expr_pap_fun(e));
                 if (sym.m_addr) {
                     // point closure directly at native symbol
-                    object * cls = alloc_closure(sym.m_addr, decl_params(sym.m_decl).size(), expr_pap_args(e).size());
+                    object * cls = alloc_closure(expr_pap_fun(e), sym.m_addr, decl_params(sym.m_decl).size(), expr_pap_args(e).size());
                     for (unsigned i = 0; i < expr_pap_args(e).size(); i++) {
                         closure_set(cls, i, eval_arg(expr_pap_args(e)[i]).m_obj);
                     }
@@ -999,7 +996,7 @@ public:
             // case, but simpler to handle.
             if (e.m_addr) {
                 // `lookup_symbol` always prefers the boxed version for compiled functions, so nothing to do here
-                r = alloc_closure(e.m_addr, arity, 0);
+                r = alloc_closure(fn, e.m_addr, arity, 0);
                 m_closure_names[(usize) closure_fun(r)] = fn;
             } else {
                 // `lookup_symbol` does not prefer the boxed version for interpreted functions, so check manually.

@@ -52,7 +52,9 @@ static void win_handle_foreach(void * /* mod */, b_obj_arg /* fn */) {
 }
 
 lean_object * wrap_win_handle(HANDLE h) {
-    return lean_alloc_external(g_win_handle_external_class, static_cast<void *>(h));
+    return lean_alloc_external(g_win_handle_external_class,
+                               name("_External.Windows.handle").to_obj_arg(),
+                               static_cast<void *>(h));
 }
 
 extern "C" obj_res lean_io_process_child_wait(b_obj_arg, b_obj_arg child, obj_arg) {

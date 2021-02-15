@@ -412,10 +412,21 @@ def emitFullApp (z : VarId) (f : FunId) (ys : Array Arg) : M Unit := do
     if ys.size > 0 then emit "("; emitArgs ys; emit ")"
     emitLn ";"
 
+def emitNameLiteral (n : Name) : M Unit := do
+  emit "name("
+  for s in n.components do
+    emit "{"
+    emit s
+    emit "}"
+  emit ").to_obj_arg()"
+
 def emitPartialApp (z : VarId) (f : FunId) (ys : Array Arg) : M Unit := do
   let decl ← getDecl f
   let arity := decl.params.size;
-  emitLhs z; emit "lean_alloc_closure((void*)("; emitCName f; emit "), "; emit arity; emit ", "; emit ys.size; emitLn ");";
+  emitLhs z
+  emit "lean_alloc_closure("
+  emitNameLiteral f
+  emit ", (void*)("; emitCName f; emit "), "; emit arity; emit ", "; emit ys.size; emitLn ");";
   ys.size.forM fun i => do
     let y := ys[i]
     emit "lean_closure_set("; emit z; emit ", "; emit i; emit ", "; emitArg y; emitLn ");"

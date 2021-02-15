@@ -16,7 +16,7 @@ static obj* fix_args(obj* f, unsigned n, obj*const* as) {
     unsigned fixed = lean_closure_num_fixed(f);
     unsigned new_fixed = fixed + n;
     lean_assert(new_fixed < arity);
-    obj * r = lean_alloc_closure(lean_closure_fun(f), arity, new_fixed);
+    obj * r = lean_alloc_closure(lean_closure_fun_name(f), lean_closure_fun(f), arity, new_fixed);
     obj ** source = lean_closure_arg_cptr(f);
     obj ** target = lean_closure_arg_cptr(r);
     if (!lean_is_exclusive(f)) {

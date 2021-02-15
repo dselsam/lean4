@@ -101,36 +101,37 @@ inline void cnstr_set_float(b_obj_arg o, unsigned offset, double v) { lean_ctor_
 // Closures
 
 void free_closure_obj(object * o);
+inline object * closure_fun_name(object * o) { return lean_closure_fun_name(o); }
 inline void * closure_fun(object * o) { return lean_closure_fun(o); }
 inline unsigned closure_arity(object * o) { return lean_closure_arity(o); }
 inline unsigned closure_num_fixed(object * o) { return lean_closure_num_fixed(o); }
 inline object ** closure_arg_cptr(object * o) { return lean_closure_arg_cptr(o); }
-inline obj_res alloc_closure(void * fun, unsigned arity, unsigned num_fixed) { return lean_alloc_closure(fun, arity, num_fixed); }
+inline obj_res alloc_closure(object * fun_name, void * fun, unsigned arity, unsigned num_fixed) { return lean_alloc_closure(fun_name, fun, arity, num_fixed); }
 inline b_obj_res closure_get(b_obj_arg o, unsigned i) { return lean_closure_get(o, i); }
 inline void closure_set(u_obj_arg o, unsigned i, obj_arg a) { lean_closure_set(o, i, a); }
-inline obj_res alloc_closure(object*(*fun)(object *), unsigned num_fixed) {
-    return alloc_closure(reinterpret_cast<void*>(fun), 1, num_fixed);
+inline obj_res alloc_closure(object * fun_name, object*(*fun)(object *), unsigned num_fixed) {
+    return alloc_closure(fun_name, reinterpret_cast<void*>(fun), 1, num_fixed);
 }
-inline obj_res alloc_closure(object*(*fun)(object *, object *), unsigned num_fixed) {
-    return alloc_closure(reinterpret_cast<void*>(fun), 2, num_fixed);
+inline obj_res alloc_closure(object * fun_name, object*(*fun)(object *, object *), unsigned num_fixed) {
+    return alloc_closure(fun_name, reinterpret_cast<void*>(fun), 2, num_fixed);
 }
-inline obj_res alloc_closure(object*(*fun)(object *, object *, object *), unsigned num_fixed) {
-    return alloc_closure(reinterpret_cast<void*>(fun), 3, num_fixed);
+inline obj_res alloc_closure(object * fun_name, object*(*fun)(object *, object *, object *), unsigned num_fixed) {
+    return alloc_closure(fun_name, reinterpret_cast<void*>(fun), 3, num_fixed);
 }
-inline obj_res alloc_closure(object*(*fun)(object *, object *, object *, object *), unsigned num_fixed) {
-    return alloc_closure(reinterpret_cast<void*>(fun), 4, num_fixed);
+inline obj_res alloc_closure(object * fun_name, object*(*fun)(object *, object *, object *, object *), unsigned num_fixed) {
+    return alloc_closure(fun_name, reinterpret_cast<void*>(fun), 4, num_fixed);
 }
-inline obj_res alloc_closure(object*(*fun)(object *, object *, object *, object *, object *), unsigned num_fixed) {
-    return alloc_closure(reinterpret_cast<void*>(fun), 5, num_fixed);
+inline obj_res alloc_closure(object * fun_name, object*(*fun)(object *, object *, object *, object *, object *), unsigned num_fixed) {
+    return alloc_closure(fun_name, reinterpret_cast<void*>(fun), 5, num_fixed);
 }
-inline obj_res alloc_closure(object*(*fun)(object *, object *, object *, object *, object *, object *), unsigned num_fixed) {
-    return alloc_closure(reinterpret_cast<void*>(fun), 6, num_fixed);
+inline obj_res alloc_closure(object * fun_name, object*(*fun)(object *, object *, object *, object *, object *, object *), unsigned num_fixed) {
+    return alloc_closure(fun_name, reinterpret_cast<void*>(fun), 6, num_fixed);
 }
-inline obj_res alloc_closure(object*(*fun)(object *, object *, object *, object *, object *, object *, object *), unsigned num_fixed) {
-    return alloc_closure(reinterpret_cast<void*>(fun), 7, num_fixed);
+inline obj_res alloc_closure(object * fun_name, object*(*fun)(object *, object *, object *, object *, object *, object *, object *), unsigned num_fixed) {
+    return alloc_closure(fun_name, reinterpret_cast<void*>(fun), 7, num_fixed);
 }
-inline obj_res alloc_closure(object*(*fun)(object *, object *, object *, object *, object *, object *, object *, object *), unsigned num_fixed) {
-    return alloc_closure(reinterpret_cast<void*>(fun), 8, num_fixed);
+inline obj_res alloc_closure(object * fun_name, object*(*fun)(object *, object *, object *, object *, object *, object *, object *, object *), unsigned num_fixed) {
+    return alloc_closure(fun_name, reinterpret_cast<void*>(fun), 8, num_fixed);
 }
 inline object* apply_1(object* f, object* a1) { return lean_apply_1(f, a1); }
 inline object* apply_2(object* f, object* a1, object* a2) { return lean_apply_2(f, a1, a2); }
@@ -312,8 +313,9 @@ inline b_obj_res io_wait_any_core(b_obj_arg task_list) { return lean_io_wait_any
 // =======================================
 // External
 
-inline object * alloc_external(external_object_class * cls, void * data) { return lean_alloc_external(cls, data); }
+inline object * alloc_external(external_object_class * cls, object * name, void * data) { return lean_alloc_external(cls, name, data); }
 inline external_object_class * external_class(object * o) { return lean_get_external_class(o); }
+inline object * external_name(object * o) { return lean_get_external_name(o); }
 inline void * external_data(object * o) { return lean_get_external_data(o); }
 
 // =======================================

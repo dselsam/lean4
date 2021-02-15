@@ -188,6 +188,7 @@ typedef struct {
 
 typedef struct {
     lean_object   m_header;
+    lean_object * m_fun_name;
     void *        m_fun;
     uint16_t      m_arity;     /* Number of arguments expected by m_fun. */
     uint16_t      m_num_fixed; /* Number of arguments that have been already fixed. */
@@ -285,6 +286,7 @@ lean_external_class * lean_register_external_class(lean_external_finalize_proc, 
 typedef struct {
     lean_object           m_header;
     lean_external_class * m_class;
+    lean_object *         m_name;
     void *                m_data;
 } lean_external_object;
 
@@ -786,15 +788,17 @@ static inline void lean_ctor_set_float(b_lean_obj_arg o, unsigned offset, double
 
 /* Closures */
 
+static inline lean_object * lean_closure_fun_name(lean_object * o) { return lean_to_closure(o)->m_fun_name; }
 static inline void * lean_closure_fun(lean_object * o) { return lean_to_closure(o)->m_fun; }
 static inline unsigned lean_closure_arity(lean_object * o) { return lean_to_closure(o)->m_arity; }
 static inline unsigned lean_closure_num_fixed(lean_object * o) { return lean_to_closure(o)->m_num_fixed; }
 static inline lean_object ** lean_closure_arg_cptr(lean_object * o) { return lean_to_closure(o)->m_objs; }
-static inline lean_obj_res lean_alloc_closure(void * fun, unsigned arity, unsigned num_fixed) {
+static inline lean_obj_res lean_alloc_closure(lean_object * fun_name, void * fun, unsigned arity, unsigned num_fixed) {
     assert(arity > 0);
     assert(num_fixed < arity);
     lean_closure_object * o = (lean_closure_object*)lean_alloc_small_object(sizeof(lean_closure_object) + sizeof(void*)*num_fixed);
     lean_set_st_header((lean_object*)o, LeanClosure, 0);
+    o->m_fun_name = fun_name;
     o->m_fun = fun;
     o->m_arity = arity;
     o->m_num_fixed = num_fixed;
@@ -1244,16 +1248,21 @@ b_lean_obj_res lean_io_wait_any_core(b_lean_obj_arg task_list);
 
 /* External objects */
 
-static inline lean_object * lean_alloc_external(lean_external_class * cls, void * data) {
+static inline lean_object * lean_alloc_external(lean_external_class * cls, lean_object * name, void * data) {
     lean_external_object * o = (lean_external_object*)lean_alloc_small_object(sizeof(lean_external_object));
     lean_set_st_header((lean_object*)o, LeanExternal, 0);
     o->m_class   = cls;
+    o->m_name    = name;
     o->m_data    = data;
     return (lean_object*)o;
 }
 
 static inline lean_external_class * lean_get_external_class(lean_object * o) {
     return lean_to_external(o)->m_class;
+}
+
+static inline lean_object * lean_get_external_name(lean_object * o) {
+    return lean_to_external(o)->m_name;
 }
 
 static inline void * lean_get_external_data(lean_object * o) {

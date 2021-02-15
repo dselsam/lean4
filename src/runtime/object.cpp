@@ -246,14 +246,14 @@ extern "C" void lean_del(object * o) {
 typedef object * (*lean_cfun2)(object *, object *); // NOLINT
 typedef object * (*lean_cfun3)(object *, object *, object *); // NOLINT
 
-static obj_res mk_closure_2_1(lean_cfun2 fn, obj_arg a) {
-    object * c = lean_alloc_closure((void*)fn, 2, 1);
+static obj_res mk_closure_2_1(object * fun_name, lean_cfun2 fn, obj_arg a) {
+    object * c = lean_alloc_closure(fun_name, (void*)fn, 2, 1);
     lean_closure_set(c, 0, a);
     return c;
 }
 
-static obj_res mk_closure_3_2(lean_cfun3 fn, obj_arg a1, obj_arg a2) {
-    object * c = lean_alloc_closure((void*)fn, 3, 2);
+static obj_res mk_closure_3_2(object * fun_name, lean_cfun3 fn, obj_arg a1, obj_arg a2) {
+    object * c = lean_alloc_closure(fun_name, (void*)fn, 3, 2);
     lean_closure_set(c, 0, a1);
     lean_closure_set(c, 1, a2);
     return c;
@@ -290,8 +290,8 @@ extern "C" lean_obj_res lean_array_set_panic(lean_obj_arg a, lean_obj_arg v) {
 // =======================================
 // Thunks
 
-static obj_res mk_thunk_3_2(lean_cfun3 fn, obj_arg a1, obj_arg a2) {
-    return lean_mk_thunk(mk_closure_3_2(fn, a1, a2));
+static obj_res mk_thunk_3_2(object * fn_name, lean_cfun3 fn, obj_arg a1, obj_arg a2) {
+    return lean_mk_thunk(mk_closure_3_2(fn_name, fn, a1, a2));
 }
 
 extern "C" b_obj_res lean_thunk_get_core(b_obj_arg t) {
@@ -365,7 +365,7 @@ obj_res fixpoint_aux(obj_arg rec, obj_arg weak_k, obj_arg a) {
 }
 
 extern "C" obj_res lean_fixpoint(obj_arg rec, obj_arg a) {
-    object * k = lean_alloc_closure((void*)fixpoint_aux, 3, 2);
+    object * k = lean_alloc_closure(name("_fixpoint_aux").to_obj_arg(), (void*)fixpoint_aux, 3, 2);
     lean_inc(rec);
     lean_closure_set(k, 0, rec);
     lean_closure_set(k, 1, ptr_to_weak_ptr(k));
@@ -380,7 +380,7 @@ obj_res fixpoint_aux2(obj_arg rec, obj_arg weak_k, obj_arg a1, obj_arg a2) {
 }
 
 extern "C" obj_res lean_fixpoint2(obj_arg rec, obj_arg a1, obj_arg a2) {
-    object * k = lean_alloc_closure((void*)fixpoint_aux2, 4, 2);
+    object * k = lean_alloc_closure(name("_fixpoint_aux2").to_obj_arg(), (void*)fixpoint_aux2, 4, 2);
     lean_inc(rec);
     lean_closure_set(k, 0, rec);
     lean_closure_set(k, 1, ptr_to_weak_ptr(k));
@@ -395,7 +395,7 @@ obj_res fixpoint_aux3(obj_arg rec, obj_arg weak_k, obj_arg a1, obj_arg a2, obj_a
 }
 
 extern "C" obj_res lean_fixpoint3(obj_arg rec, obj_arg a1, obj_arg a2, obj_arg a3) {
-    object * k = lean_alloc_closure((void*)fixpoint_aux3, 5, 2);
+    object * k = lean_alloc_closure(name("_fixpoint_aux3").to_obj_arg(), (void*)fixpoint_aux3, 5, 2);
     lean_inc(rec);
     lean_closure_set(k, 0, rec);
     lean_closure_set(k, 1, ptr_to_weak_ptr(k));
@@ -410,7 +410,7 @@ obj_res fixpoint_aux4(obj_arg rec, obj_arg weak_k, obj_arg a1, obj_arg a2, obj_a
 }
 
 extern "C" obj_res lean_fixpoint4(obj_arg rec, obj_arg a1, obj_arg a2, obj_arg a3, obj_arg a4) {
-    object * k = lean_alloc_closure((void*)fixpoint_aux4, 6, 2);
+    object * k = lean_alloc_closure(name("_fixpoint_aux4").to_obj_arg(), (void*)fixpoint_aux4, 6, 2);
     lean_inc(rec);
     lean_closure_set(k, 0, rec);
     lean_closure_set(k, 1, ptr_to_weak_ptr(k));
@@ -425,7 +425,7 @@ obj_res fixpoint_aux5(obj_arg rec, obj_arg weak_k, obj_arg a1, obj_arg a2, obj_a
 }
 
 extern "C" obj_res lean_fixpoint5(obj_arg rec, obj_arg a1, obj_arg a2, obj_arg a3, obj_arg a4, obj_arg a5) {
-    object * k = lean_alloc_closure((void*)fixpoint_aux5, 7, 2);
+    object * k = lean_alloc_closure(name("_fixpoint_aux5").to_obj_arg(), (void*)fixpoint_aux5, 7, 2);
     lean_inc(rec);
     lean_closure_set(k, 0, rec);
     lean_closure_set(k, 1, ptr_to_weak_ptr(k));
@@ -440,7 +440,7 @@ obj_res fixpoint_aux6(obj_arg rec, obj_arg weak_k, obj_arg a1, obj_arg a2, obj_a
 }
 
 extern "C" obj_res lean_fixpoint6(obj_arg rec, obj_arg a1, obj_arg a2, obj_arg a3, obj_arg a4, obj_arg a5, obj_arg a6) {
-    object * k = lean_alloc_closure((void*)fixpoint_aux6, 8, 2);
+    object * k = lean_alloc_closure(name("_fixpoint_aux6").to_obj_arg(), (void*)fixpoint_aux6, 8, 2);
     lean_inc(rec);
     lean_closure_set(k, 0, rec);
     lean_closure_set(k, 1, ptr_to_weak_ptr(k));
@@ -501,7 +501,8 @@ extern "C" void lean_mark_persistent(object * o) {
                 case LeanMPZ:
                     break;
                 case LeanExternal: {
-                    object * fn = lean_alloc_closure((void*)mark_persistent_fn, 1, 0);
+                    object * fn = lean_alloc_closure(lean_to_external(o)->m_name,
+                                                     (void*)mark_persistent_fn, 1, 0);
                     lean_to_external(o)->m_class->m_foreach(lean_to_external(o)->m_data, fn);
                     lean_dec(fn);
                     break;
@@ -580,7 +581,8 @@ extern "C" void lean_mark_mt(object * o) {
                 case LeanMPZ:
                     break;
                 case LeanExternal: {
-                    object * fn = lean_alloc_closure((void*)mark_mt_fn, 1, 0);
+                    object * fn = lean_alloc_closure(lean_to_external(o)->m_name,
+                                                     (void*)mark_mt_fn, 1, 0);
                     lean_to_external(o)->m_class->m_foreach(lean_to_external(o)->m_data, fn);
                     lean_dec(fn);
                     break;
@@ -992,11 +994,11 @@ static obj_res task_map_fn(obj_arg f, obj_arg t, obj_arg) {
     return lean_apply_1(f, v);
 }
 
-extern "C" obj_res lean_task_map_core(obj_arg f, obj_arg t, unsigned prio, bool keep_alive) {
+extern "C" obj_res lean_task_map_core(object * f_name, obj_arg f, obj_arg t, unsigned prio, bool keep_alive) {
     if (!g_task_manager) {
         return lean_task_pure(apply_1(f, lean_task_get_own(t)));
     } else {
-        lean_task_object * new_task = alloc_task(mk_closure_3_2(task_map_fn, f, t), prio, keep_alive);
+        lean_task_object * new_task = alloc_task(mk_closure_3_2(f_name, task_map_fn, f, t), prio, keep_alive);
         g_task_manager->add_dep(lean_to_task(t), new_task);
         return (lean_object*)new_task;
     }
