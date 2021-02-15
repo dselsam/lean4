@@ -68,9 +68,12 @@ def visitObject (x : Object) : CollectFnsM Unit := do
   | Object.closure (some f) _ _ => visitFn f
   | _                           => pure ()
 
-
-def collectFns (result : Result) : IO Unit := do
-  (visitObject result.obj *> processTodo) { env := result.env } |>.run' {}
+def collectFns (result : Result) : IO (Array Name) := do
+  let act : CollectFnsM (Array Name) := do
+    visitObject result.obj
+    processTodo
+    pure (← get).visited.toArray
+  act { env := result.env } |>.run' {}
 
 end CollectFns
 
