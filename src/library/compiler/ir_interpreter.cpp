@@ -58,6 +58,9 @@ functions, which have a (relatively) homogeneous ABI that we can use without run
 
 namespace lean {
 namespace ir {
+
+bool is_inspect(name const & fn) { return fn == name({"Lean", "Inspect", "inspectCore"}); }
+
 // C++ wrappers of Lean data types
 
 typedef object_ref lit_val;
@@ -334,6 +337,9 @@ class interpreter {
     // caches symbol lookup successes _and_ failures
     name_map<symbol_cache_entry> m_symbol_cache;
 
+    // experimental map from `void *` addresses to function names
+    std::unordered_map<usize, name> m_closure_names;
+
     /** \brief Get current stack frame */
     inline frame & get_frame() {
         return m_call_stack.back();
@@ -403,6 +409,8 @@ private:
         closure_set(cls, 2, d.to_obj_arg());
         for (unsigned i = 0; i < n ; i++)
             closure_set(cls, 3 + i, args[i]);
+
+        m_closure_names[(usize) closure_fun(cls)] = decl_fun_id(d);
         return cls;
     }
 
@@ -472,6 +480,7 @@ private:
                     for (unsigned i = 0; i < expr_pap_args(e).size(); i++) {
                         closure_set(cls, i, eval_arg(expr_pap_args(e)[i]).m_obj);
                     }
+                    m_closure_names[(usize) closure_fun(cls)] = expr_pap_fun(e);
                     return cls;
                 } else {
                     // point closure at interpreter stub
@@ -797,7 +806,68 @@ private:
         }
     }
 
+    object * inspect(object * obj) {
+        DEBUG_CODE({ lean_trace(name({"interpreter", "inspect"}), tout() << "[inspect] " << obj << "\n";); });
+        if (is_scalar(obj)) {
+            // Object.scalar
+            object * result = lean_alloc_ctor(3, 1, 0);
+            // TODO: parse scalar info?
+            lean_ctor_set(result, 0, usize_to_nat((usize) obj));
+            return result;
+        } else if (is_cnstr(obj)) {
+            unsigned tag = cnstr_tag(obj);
+            unsigned n = cnstr_num_objs(obj);
+            object * args = array_mk_empty();
+            for (unsigned i = 0; i < n; ++i) {
+                args = array_push(args, inspect(cnstr_get(obj, i)));
+            }
+            // Object.ctor
+            object * result = lean_alloc_ctor(0, 2, 0);
+            lean_ctor_set(result, 0, mk_nat_obj(tag));
+            lean_ctor_set(result, 1, args);
+            return result;
+        } else if (is_closure(obj)) {
+            void * fun = closure_fun(obj);
+            unsigned arity = closure_arity(obj);
+            unsigned num_fixed = closure_num_fixed(obj);
+            object * fixed = array_mk_empty();
+            for (unsigned i = 0; i < num_fixed; ++i) {
+                fixed = array_push(fixed, inspect(closure_get(obj, i)));
+            }
+            // Object.closure
+            object * result = lean_alloc_ctor(1, 3, 0);
+
+            object * option_name;
+            if (m_closure_names.count((usize) fun)) {
+                option_name = mk_option_some(m_closure_names[(usize) fun].to_obj_arg());
+            } else {
+                option_name = mk_option_none();
+            }
+            lean_ctor_set(result, 0, option_name);
+            lean_ctor_set(result, 1, mk_nat_obj(arity));
+            lean_ctor_set(result, 2, fixed);
+            return result;
+        } else {
+            // TODO(dselsam): support other kinds
+            // Object.unsupported
+            return lean_alloc_ctor(3, 0, 0);
+        }
+    }
+
+    value call_inspect(name const & fn, array_ref<arg> const & args) {
+        object * obj = eval_arg(args[0]).m_obj;
+        object * inspect_obj = inspect(obj);
+
+        object * result = lean_alloc_ctor(0, 2, 0);
+        lean_ctor_set(result, 0, inspect_obj);
+        lean_ctor_set(result, 1, m_env.to_obj_arg());
+
+        return io_result_mk_ok(result);
+    }
+
     value call(name const & fn, array_ref<arg> const & args) {
+        if (is_inspect(fn)) return call_inspect(fn, args);
+
         size_t old_size = m_arg_stack.size();
         value r;
         symbol_cache_entry e = lookup_symbol(fn);
@@ -931,6 +1001,7 @@ public:
             if (e.m_addr) {
                 // `lookup_symbol` always prefers the boxed version for compiled functions, so nothing to do here
                 r = alloc_closure(e.m_addr, arity, 0);
+                m_closure_names[(usize) closure_fun(r)] = fn;
             } else {
                 // `lookup_symbol` does not prefer the boxed version for interpreted functions, so check manually.
                 decl d = e.m_decl;
@@ -1049,6 +1120,7 @@ void initialize_ir_interpreter() {
         register_trace_class({"interpreter"});
         register_trace_class({"interpreter", "call"});
         register_trace_class({"interpreter", "step"});
+        register_trace_class({"interpreter", "inspect"});
     });
 }
 
