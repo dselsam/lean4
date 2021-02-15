@@ -809,7 +809,7 @@ private:
     object * inspect(object * obj) {
         DEBUG_CODE({ lean_trace(name({"interpreter", "inspect"}), tout() << "[inspect] " << obj << "\n";); });
         if (is_scalar(obj)) {
-            // scalar
+            // Object.scalar
             object * result = lean_alloc_ctor(3, 1, 0);
             // TODO: parse scalar info?
             lean_ctor_set(result, 0, usize_to_nat((usize) obj));
@@ -821,7 +821,8 @@ private:
             for (unsigned i = 0; i < n; ++i) {
                 args = array_push(args, inspect(cnstr_get(obj, i)));
             }
-            object * result = lean_alloc_ctor(1, 2, 0);
+            // Object.ctor
+            object * result = lean_alloc_ctor(0, 2, 0);
             lean_ctor_set(result, 0, mk_nat_obj(tag));
             lean_ctor_set(result, 1, args);
             return result;
@@ -833,7 +834,8 @@ private:
             for (unsigned i = 0; i < num_fixed; ++i) {
                 fixed = array_push(fixed, inspect(closure_get(obj, i)));
             }
-            object * result = lean_alloc_ctor(2, 3, 0);
+            // Object.closure
+            object * result = lean_alloc_ctor(1, 3, 0);
 
             object * option_name;
             if (m_closure_names.count((usize) fun)) {
@@ -847,7 +849,7 @@ private:
             return result;
         } else {
             // Object.unsupported
-            return lean_alloc_ctor(0, 0, 0);
+            return lean_alloc_ctor(3, 0, 0);
         }
     }
 

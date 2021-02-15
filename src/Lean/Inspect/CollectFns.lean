@@ -63,10 +63,14 @@ partial def processTodo : CollectFnsM Unit := do
   visitFn f
   processTodo
 
-def visitObject (x : Object) : CollectFnsM Unit := do
+partial def visitObject (x : Object) : CollectFnsM Unit := do
   match x with
-  | Object.closure (some f) _ _ => visitFn f
-  | _                           => pure ()
+  | Object.ctor _ args             => for arg in args do visitObject arg
+  | Object.closure (some f) _ args => visitFn f *> for arg in args do visitObject arg
+  | Object.closure none _ args     => for arg in args do visitObject arg
+  | Object.scalar _                => pure ()
+  | Object.unsupported             => pure ()
+  | Object.error _                 => pure ()
 
 def collectFns (result : Result) : IO (Array Name) := do
   let act : CollectFnsM (Array Name) := do
