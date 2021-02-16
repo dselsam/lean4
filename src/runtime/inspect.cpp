@@ -68,7 +68,7 @@ static object * inspect_core(object * thing) {
         }
 
         if (dl_result && info.dli_sname) {
-            lean_ctor_set(result, 1, mk_option_some(mk_string(info.dli_fname)));
+            lean_ctor_set(result, 1, mk_option_some(mk_string(info.dli_sname)));
         } else {
             lean_ctor_set(result, 1, mk_option_none());
         }
