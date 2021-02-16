@@ -1857,6 +1857,8 @@ lean_obj_res lean_st_ref_swap(b_lean_obj_arg, lean_obj_arg, lean_obj_arg);
 /* pointer address unsafe primitive  */
 static inline size_t lean_ptr_addr(b_lean_obj_arg a) { return (size_t)a; }
 
+lean_object * lean_inspect(lean_object *, lean_object * /* world */);
+
 #ifdef __cplusplus
 }
 #endif

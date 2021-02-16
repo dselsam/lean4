@@ -5,6 +5,7 @@ Authors: Daniel Selsam
 */
 #include "lean/object.h"
 #include "lean/io.h"
+#include <dlfcn.h> // Not supported on Windows
 
 namespace lean {
 
@@ -45,7 +46,6 @@ static object * inspect_core(object * thing) {
         lean_ctor_set(result, 1, args);
         return result;
     } else if (is_closure(thing)) {
-        void * fun = closure_fun(thing);
         unsigned arity = closure_arity(thing);
         unsigned num_fixed = closure_num_fixed(thing);
         object * fixed = array_mk_empty();
@@ -55,7 +55,6 @@ static object * inspect_core(object * thing) {
         // Object.closure
         object * result = lean_alloc_ctor(1, 4, 0);
 
-        object * option_name;
         Dl_info info;
         int dl_result = dladdr(closure_fun(thing), &info);
         if (dl_result) {
@@ -75,7 +74,7 @@ static object * inspect_core(object * thing) {
     }
 }
 
-static object * lean_inspect(object * thing, object * /* world */) {
+object * lean_inspect(object * thing, object * /* world */) {
     object * result = inspect_core(thing);
     return io_result_mk_ok(result);
 
