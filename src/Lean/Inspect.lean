@@ -17,6 +17,6 @@ inductive Object : Type
 end Inspect
 
 @[extern "lean_inspect"]
-constant inspect {α : Type} (thing : α) : IO Inspect.Object
+constant inspect (thing : PNonScalar) : IO Inspect.Object
 
 end Lean

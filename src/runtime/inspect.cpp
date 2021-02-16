@@ -7,8 +7,6 @@ Authors: Daniel Selsam
 #include "lean/io.h"
 #include <dlfcn.h> // Not supported on Windows
 
-namespace lean {
-
 /*
 The following function, `lean_inspect`, is extern for `Lean.inspect`:
 
@@ -25,8 +23,12 @@ be kept in sync with the definition of Lean.Inspect.Object:
     | scalar      : Nat → Object
     | unsupported : Object
 */
+namespace lean {
+
 static object * inspect_core(object * thing) {
+    std::cout << "[inspect] " << thing << std::endl;
     if (is_scalar(thing)) {
+        std::cout << "[inspect] scalar" << std::endl;
         // (This check must be first since header-checks will fail on scalars)
         // Object.scalar
         object * result = lean_alloc_ctor(2, 1, 0);
@@ -34,6 +36,7 @@ static object * inspect_core(object * thing) {
         lean_ctor_set(result, 0, usize_to_nat((usize) thing));
         return result;
     } else if (is_cnstr(thing)) {
+        std::cout << "[inspect] cnstr" << std::endl;
         unsigned tag = cnstr_tag(thing);
         unsigned n = cnstr_num_objs(thing);
         object * args = array_mk_empty();
@@ -46,6 +49,7 @@ static object * inspect_core(object * thing) {
         lean_ctor_set(result, 1, args);
         return result;
     } else if (is_closure(thing)) {
+        std::cout << "[inspect] closure" << std::endl;
         unsigned arity = closure_arity(thing);
         unsigned num_fixed = closure_num_fixed(thing);
         object * fixed = array_mk_empty();
@@ -57,27 +61,32 @@ static object * inspect_core(object * thing) {
 
         Dl_info info;
         int dl_result = dladdr(closure_fun(thing), &info);
-        if (dl_result) {
+        if (dl_result && info.dli_fname) {
             lean_ctor_set(result, 0, mk_option_some(mk_string(info.dli_fname)));
-            lean_ctor_set(result, 1, mk_option_some(mk_string(info.dli_sname)));
         } else {
             lean_ctor_set(result, 0, mk_option_none());
+        }
+
+        if (dl_result && info.dli_sname) {
+            lean_ctor_set(result, 1, mk_option_some(mk_string(info.dli_fname)));
+        } else {
             lean_ctor_set(result, 1, mk_option_none());
         }
+
         lean_ctor_set(result, 2, mk_nat_obj(arity));
         lean_ctor_set(result, 3, fixed);
         return result;
     } else {
+        std::cout << "[inspect] unsupported" << std::endl;
         // TODO(dselsam): support other kinds
         // Object.unsupported
         return lean_alloc_ctor(3, 0, 0);
     }
 }
 
-object * lean_inspect(object * thing, object * /* world */) {
-    object * result = inspect_core(thing);
-    return io_result_mk_ok(result);
-
 }
 
+lean_object * lean_inspect(lean_object * thing, lean_object * /* world */) {
+    lean_object * result = lean::inspect_core(thing);
+    return lean::io_result_mk_ok(result);
 }
