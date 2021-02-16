@@ -9,7 +9,7 @@ namespace Lean.Inspect
 
 inductive Object : Type
   | ctor        : Nat → Array Object → Object
-  | closure     : Option Name → Nat → Array Object → Object
+  | closure     : (fileName symbolName : Option String) → Nat → Array Object → Object
   | scalar      : Nat → Object
   | unsupported : Object /- TODO(dselsam): other kinds -/
   | error       : Nat → Object /- only used for inspectCore's nominal definition -/

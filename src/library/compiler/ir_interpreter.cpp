@@ -835,17 +835,20 @@ private:
                 fixed = array_push(fixed, inspect(closure_get(obj, i)));
             }
             // Object.closure
-            object * result = lean_alloc_ctor(1, 3, 0);
+            object * result = lean_alloc_ctor(1, 4, 0);
 
             object * option_name;
-            if (m_closure_names.count((usize) fun)) {
-                option_name = mk_option_some(m_closure_names[(usize) fun].to_obj_arg());
+            Dl_info info;
+            int dl_result = dladdr(closure_fun(obj), &info);
+            if (dl_result) {
+                lean_ctor_set(result, 0, mk_option_some(mk_string(info.dli_fname)));
+                lean_ctor_set(result, 1, mk_option_some(mk_string(info.dli_sname)));
             } else {
-                option_name = mk_option_none();
+                lean_ctor_set(result, 0, mk_option_none());
+                lean_ctor_set(result, 1, mk_option_none());
             }
-            lean_ctor_set(result, 0, option_name);
-            lean_ctor_set(result, 1, mk_nat_obj(arity));
-            lean_ctor_set(result, 2, fixed);
+            lean_ctor_set(result, 2, mk_nat_obj(arity));
+            lean_ctor_set(result, 3, fixed);
             return result;
         } else {
             // TODO(dselsam): support other kinds
