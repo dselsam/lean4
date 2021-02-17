@@ -1,0 +1,4 @@
+@OfNat.ofNat.{u} α 0 (@OfNat.mk.{u} α 0 (@Zero.zero.{u} α inst✝²)) : α
+@OfNat.ofNat.{u} α 1 (@OfNat.mk.{u} α 1 (@One.one.{u} α inst✝¹)) : α
+@OfNat.ofNat.{u} α 2 (@OfNat.mk.{u} α 2 (@bit0.{u} α inst✝ (@One.one.{u} α inst✝¹))) : α
+@OfNat.ofNat.{u} α 5 (@OfNat.mk.{u} α 5 (@bit1.{u} α inst✝¹ inst✝ (@bit0.{u} α inst✝ (@One.one.{u} α inst✝¹)))) : α

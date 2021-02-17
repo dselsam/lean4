@@ -3,6 +3,7 @@ Copyright (c) 2019 Microsoft Corporation. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Leonardo de Moura
 -/
+import Lean.KeyedDeclsAttribute
 import Lean.ScopedEnvExtension
 import Lean.Meta.DiscrTree
 
@@ -125,5 +126,23 @@ def getDefaultInstancesPriorities [Monad m] [MonadEnv m] : m PrioritySet :=
 
 def getDefaultInstances [Monad m] [MonadEnv m] (className : Name) : m (List (Name × Nat)) :=
   return defaultInstanceExtension.getState (← getEnv) |>.defaultInstances.find? className |>.getD []
+
+structure InstancePostProcessor : Type where
+  apply : Expr → MetaM (Option Expr)
+
+unsafe def mkInstancePostProcessorAttribute : IO (KeyedDeclsAttribute InstancePostProcessor) :=
+  KeyedDeclsAttribute.init {
+    builtinName   := `builtinInstancePostProcessor,
+    name          := `instancePostProcessor,
+    descr         := "Register a post-processor for an instance.",
+    valueTypeName := `Lean.Meta.InstancePostProcessor
+  } `Lean.Meta.instancePostProcessorAttribute
+@[builtinInit mkInstancePostProcessorAttribute] constant instancePostProcessorAttribute : KeyedDeclsAttribute InstancePostProcessor
+
+def getInstancePostProcessorsFor (k : Name) : MetaM (List InstancePostProcessor) := do
+  let env ← getEnv
+  match (instancePostProcessorAttribute.ext.getState env).table.find? k with
+   | some posts => pure posts
+   | none       => pure []
 
 end Lean.Meta

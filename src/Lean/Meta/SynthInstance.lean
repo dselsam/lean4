@@ -311,6 +311,18 @@ def getSubgoals (lctx : LocalContext) (localInsts : LocalInstances) (xs : Array 
       pure { result with subgoals := result.subgoals.reverse }
   | _ => pure result
 
+def tryPostProcess (instVal : Expr) : MetaM Expr := do
+  let f := instVal.getAppFn
+  if not f.isConst then pure instVal else
+    let posts ← getInstancePostProcessorsFor f.constName!
+    for post in posts do
+      match ← post.apply instVal with
+      | none => pure ()
+      | some newInstVal => do
+        trace[Meta.synthInstance.postprocess]! "{instVal} ==> {newInstVal}"
+        return newInstVal
+    return instVal
+
 def tryResolveCore (mvar : Expr) (inst : Expr) : MetaM (Option (MetavarContext × List Expr)) := do
   let mvarType   ← inferType mvar
   let lctx       ← getLCtx
@@ -319,6 +331,7 @@ def tryResolveCore (mvar : Expr) (inst : Expr) : MetaM (Option (MetavarContext �
     let ⟨subgoals, instVal, instTypeBody⟩ ← getSubgoals lctx localInsts xs inst
     trace[Meta.synthInstance.tryResolve]! "{mvarTypeBody} =?= {instTypeBody}"
     if (← isDefEq mvarTypeBody instTypeBody) then
+      let instVal ← tryPostProcess instVal
       let instVal ← mkLambdaFVars xs instVal
       if (← isDefEq mvar instVal) then
         trace[Meta.synthInstance.tryResolve]! "success"
@@ -642,5 +655,6 @@ builtin_initialize
   registerTraceClass `Meta.synthInstance.tryResolve
   registerTraceClass `Meta.synthInstance.resume
   registerTraceClass `Meta.synthInstance.generate
+  registerTraceClass `Meta.synthInstance.postprocess
 
 end Lean.Meta
