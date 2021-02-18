@@ -9,17 +9,13 @@ variable {α : Type u} [Zero α] [One α] [Add α]
 def bit0 (x : α) : α := x + x
 def bit1 (x : α) : α := bit0 x + One.one
 
-instance instOne2Inhabited : Inhabited α := ⟨Zero.zero⟩
+instance : Inhabited α := ⟨Zero.zero⟩
+instance [Inhabited α] : Inhabited (OfNat α n) := ⟨⟨Zero.zero⟩⟩
 
 open Lean Lean.Meta
 
-partial def nat2bits (n : Nat) : α :=
-  if n == 0 then Zero.zero
-  else if n == 1 then One.one
-  else if n % 2 == 1 then bit1 (nat2bits (n / 2))
-  else bit0 (nat2bits (n / 2))
-
-instance instBits2Nat (n : Nat) : OfNat α n := ⟨nat2bits n⟩
+@[instance]
+constant instBits2Nat {α : Type u} [Zero α] [One α] [Add α] (n : Nat) : OfNat α n
 
 open Lean.Meta (mkAppM instantiateMVars)
 
