@@ -311,17 +311,18 @@ def getSubgoals (lctx : LocalContext) (localInsts : LocalInstances) (xs : Array 
       pure { result with subgoals := result.subgoals.reverse }
   | _ => pure result
 
-def tryPostProcess (instVal : Expr) : MetaM Expr := do
+def tryPostProcess (instVal : Expr) : MetaM (Option Expr) := do
   let f := instVal.getAppFn
   if not f.isConst then pure instVal else
     let posts ← getInstancePostProcessorsFor f.constName!
+    if posts.isEmpty then return instVal
     for post in posts do
       match ← post.apply instVal with
       | none => pure ()
       | some newInstVal => do
         trace[Meta.synthInstance.postprocess]! "{instVal} ==> {newInstVal}"
-        return newInstVal
-    return instVal
+        return (some newInstVal)
+    return none
 
 def tryResolveCore (mvar : Expr) (inst : Expr) : MetaM (Option (MetavarContext × List Expr)) := do
   let mvarType   ← inferType mvar
@@ -331,17 +332,19 @@ def tryResolveCore (mvar : Expr) (inst : Expr) : MetaM (Option (MetavarContext �
     let ⟨subgoals, instVal, instTypeBody⟩ ← getSubgoals lctx localInsts xs inst
     trace[Meta.synthInstance.tryResolve]! "{mvarTypeBody} =?= {instTypeBody}"
     if (← isDefEq mvarTypeBody instTypeBody) then
-      let instVal ← tryPostProcess instVal
-      let instVal ← mkLambdaFVars xs instVal
-      if (← isDefEq mvar instVal) then
-        trace[Meta.synthInstance.tryResolve]! "success"
-        pure (some ((← getMCtx), subgoals))
+      match ← tryPostProcess instVal with
+      | none => pure none
+      | some instVal => do
+        let instVal ← mkLambdaFVars xs instVal
+        if (← isDefEq mvar instVal) then
+          trace[Meta.synthInstance.tryResolve]! "success"
+          pure (some ((← getMCtx), subgoals))
+        else
+          trace[Meta.synthInstance.tryResolve]! "failure assigning"
+          pure none
       else
-        trace[Meta.synthInstance.tryResolve]! "failure assigning"
+        trace[Meta.synthInstance.tryResolve]! "failure"
         pure none
-    else
-      trace[Meta.synthInstance.tryResolve]! "failure"
-      pure none
 
 /--
   Try to synthesize metavariable `mvar` using the instance `inst`.
