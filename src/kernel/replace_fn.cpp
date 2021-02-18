@@ -8,10 +8,9 @@ Author: Leonardo de Moura
 #include <memory>
 #include "kernel/replace_fn.h"
 #include "kernel/cache_stack.h"
+#include "devin.h"
 
-#ifndef LEAN_DEFAULT_REPLACE_CACHE_CAPACITY
-#define LEAN_DEFAULT_REPLACE_CACHE_CAPACITY 1024*8
-#endif
+unsigned LEAN_DEFAULT_REPLACE_CACHE_CAPACITY = 1024 * (1 + devin_choose_int_below(32));
 
 namespace lean {
 struct replace_cache {

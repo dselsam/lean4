@@ -10,10 +10,9 @@ Author: Leonardo de Moura
 #include <lean/thread.h>
 #include "kernel/expr.h"
 #include "kernel/expr_sets.h"
+#include "devin.h"
 
-#ifndef LEAN_EQ_CACHE_CAPACITY
-#define LEAN_EQ_CACHE_CAPACITY 1024*8
-#endif
+unsigned LEAN_EQ_CACHE_CAPACITY = 1024 * (1 + devin_choose_int_below(32));
 
 namespace lean {
 struct eq_cache {

@@ -11,10 +11,9 @@ Author: Leonardo de Moura
 #include <lean/flet.h>
 #include "kernel/for_each_fn.h"
 #include "kernel/cache_stack.h"
+#include "devin.h"
 
-#ifndef LEAN_DEFAULT_FOR_EACH_CACHE_CAPACITY
-#define LEAN_DEFAULT_FOR_EACH_CACHE_CAPACITY 1024*8
-#endif
+unsigned LEAN_DEFAULT_FOR_EACH_CACHE_CAPACITY = 1024 * (1 + devin_choose_int_below(32));
 
 namespace lean {
 struct for_each_cache {

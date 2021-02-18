@@ -283,6 +283,11 @@ else()
     set(COPY_LIBS ${COPY_LIBS} ${GMP_LIBRARIES})
     # dlopen
     set(EXTRA_LIBS ${EXTRA_LIBS} ${CMAKE_DL_LIBS})
+
+    add_library(lean_external_deps INTERFACE)
+    target_link_libraries(lean_external_deps INTERFACE /home/dselsam/omega/devin/code/libdevin.so)
+    include_directories(lean_external_deps INTERFACE /home/dselsam/omega/devin/code)
+    set(EXTRA_LIBS ${EXTRA_LIBS} lean_external_deps)
 endif()
 
 # ccache
